@@ -110,7 +110,7 @@ fetch('./TriyugTopo_v4.json')
 function initializeDropdowns() {
     // FIXED: Changed from Rem to VDC based on your attribute table
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "Select Municipality");
+    populateSelect(vdcSelect, vdcs, "Select VDC");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
