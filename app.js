@@ -58,7 +58,7 @@ fetch('./TriyugTopo_v4.json')
 // 1. Initialize Cascading Dropdowns
 function initializeDropdowns() {
     // Extract unique VDCs using 'rem'
-    const vdcs = [...new Set(geojsonData.map(f => f.properties.rem))].filter(Boolean).sort();
+    const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
     
     if (vdcs.length === 0) {
         showError("No VDC (rem) data found in the file. Check attribute names.");
@@ -71,7 +71,7 @@ function initializeDropdowns() {
     vdcSelect.addEventListener('change', () => {
         const selectedVDC = vdcSelect.value;
         const wards = [...new Set(geojsonData
-            .filter(f => f.properties.rem === selectedVDC)
+            .filter(f => f.properties.Rem === selectedVDC)
             .map(f => f.properties.ward))].filter(Boolean).sort((a,b) => a-b);
         
         populateSelect(wardSelect, wards, "Select Ward");
@@ -81,7 +81,7 @@ function initializeDropdowns() {
 
     wardSelect.addEventListener('change', () => {
         const sheets = [...new Set(geojsonData
-            .filter(f => f.properties.rem === vdcSelect.value && f.properties.ward == wardSelect.value)
+            .filter(f => f.properties.Rem === vdcSelect.value && f.properties.ward == wardSelect.value)
             .map(f => f.properties.wd))].filter(Boolean).sort();
         
         populateSelect(sheetSelect, sheets, "Select Sheet");
@@ -91,9 +91,9 @@ function initializeDropdowns() {
 
     sheetSelect.addEventListener('change', () => {
         const parcels = [...new Set(geojsonData
-            .filter(f => f.properties.rem === vdcSelect.value && 
-                         f.properties.ward == wardSelect.value && 
-                         f.properties.wd == sheetSelect.value)
+            .filter(f => f.properties.Rem === vdcSelect.value && 
+                         f.properties.WARD == wardSelect.value && 
+                         f.properties.WD == sheetSelect.value)
             .map(f => f.properties.parcel_no))].filter(Boolean).sort((a,b) => a-b);
         
         populateSelect(parcelSelect, parcels, "Select Parcel");
