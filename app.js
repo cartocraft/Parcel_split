@@ -3,7 +3,7 @@ let map, geojsonData;
 let currentParcelLayer = null;
 let mapSheetLayer = L.layerGroup(); 
 let lengthLabelsLayer = L.layerGroup();
-let splitResultsLayer = L.layerGroup(); // NEW: Holds the severed polygon
+let splitResultsLayer = L.layerGroup(); 
 let isLabelsVisible = false;
 let activeFeatureData = null; 
 
@@ -53,7 +53,7 @@ map.on('zoomend moveend', () => numScale.update(map));
 lengthLabelsLayer.addTo(map);
 splitResultsLayer.addTo(map);
 
-// UI Elements
+// UI Elements (Safely mapped)
 const vdcSelect = document.getElementById('vdc-select');
 const wardSelect = document.getElementById('ward-select');
 const sheetSelect = document.getElementById('sheet-select');
@@ -62,72 +62,118 @@ const searchBtn = document.getElementById('search-btn');
 const toggleLabels = document.getElementById('toggle-labels');
 const sidebar = document.getElementById('sidebar');
 
-// NEW: Split Tool Elements
+// Split Tool Elements (Safely mapped)
 const splitToggleBtn = document.getElementById('toggle-split-btn');
 const splitForm = document.getElementById('split-form');
 const splitAreaInput = document.getElementById('split-area');
 const splitDirSelect = document.getElementById('split-direction');
 const executeSplitBtn = document.getElementById('execute-split-btn');
 const splitError = document.getElementById('split-error');
+const errorDisplay = document.getElementById('error-message');
+const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+const closeSidebarBtn = document.getElementById('close-sidebar-btn');
 
-function toggleSidebar(show) { sidebar.classList.toggle('-translate-x-full', !show); }
-document.getElementById('toggle-sidebar-btn').addEventListener('click', () => toggleSidebar(true));
-document.getElementById('close-sidebar-btn').addEventListener('click', () => toggleSidebar(false));
+// Safe Sidebar Toggles
+function toggleSidebar(show) { if(sidebar) sidebar.classList.toggle('-translate-x-full', !show); }
+if (toggleSidebarBtn) toggleSidebarBtn.addEventListener('click', () => toggleSidebar(true));
+if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', () => toggleSidebar(false));
 function closeSidebarOnMobile() { if (window.innerWidth < 768) toggleSidebar(false); }
 
-splitToggleBtn.addEventListener('click', () => {
-    splitForm.classList.toggle('hidden');
-    splitError.classList.add('hidden');
-});
+if (splitToggleBtn && splitForm && splitError) {
+    splitToggleBtn.addEventListener('click', () => {
+        splitForm.classList.toggle('hidden');
+        splitError.classList.add('hidden');
+    });
+}
 
 // Load Data
+console.log("Attempting to fetch data...");
 fetch('./TriyugTopo_v4.json')
-    .then(res => res.json())
+    .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
+        return res.json();
+    })
     .then(topology => {
+        console.log("Data fetched successfully. Parsing TopoJSON...");
         const objectName = Object.keys(topology.objects)[0];
         geojsonData = topojson.feature(topology, topology.objects[objectName]).features;
         
+        console.log(`Successfully parsed ${geojsonData.length} parcels. First parcel properties:`, geojsonData[0].properties);
+
         geojsonData.forEach(f => {
             if (f.properties && f.properties.WARD != null) {
-                f.properties.WARD = parseInt(f.properties.WARD, 10).toString();
+                f.properties.WARD = parseInt(f.properties.WARD, 10).toString(); 
             }
         });
+        
         initializeDropdowns();
+    })
+    .catch(err => {
+        console.error("FATAL ERROR loading JSON:", err);
+        if (errorDisplay) {
+            errorDisplay.textContent = `Data Fetch Error: ${err.message}. Check browser console (F12).`;
+            errorDisplay.classList.remove('hidden');
+        }
+        if (vdcSelect) vdcSelect.innerHTML = '<option>Error loading data</option>';
     });
 
 function initializeDropdowns() {
+    if (!vdcSelect || !geojsonData) return;
+
+    // Use VDC as per the attribute table
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "Select Municipality (Rem)");
+    
+    if (vdcs.length === 0) {
+        console.warn("WARNING: No VDC attributes found in the dataset! Check column names.");
+    }
+
+    populateSelect(vdcSelect, vdcs, "Select Municipality");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
+        if (!wardSelect) return;
         const wards = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
         populateSelect(wardSelect, wards, "Select Ward No.");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
     });
 
-    wardSelect.addEventListener('change', () => {
-        const sheets = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
-        populateSelect(sheetSelect, sheets, "Select Sheet No.");
-        sheetSelect.disabled = false;
-        resetSelects([parcelSelect]);
-    });
+    if (wardSelect) {
+        wardSelect.addEventListener('change', () => {
+            if (!sheetSelect) return;
+            const sheets = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
+            populateSelect(sheetSelect, sheets, "Select Sheet No.");
+            sheetSelect.disabled = false;
+            resetSelects([parcelSelect]);
+        });
+    }
 
-    sheetSelect.addEventListener('change', () => {
-        const parcels = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value).map(f => f.properties.PARCEL_NO))].filter(Boolean).sort((a,b) => a-b);
-        populateSelect(parcelSelect, parcels, "Select Parcel No.");
-        parcelSelect.disabled = false;
-    });
+    if (sheetSelect) {
+        sheetSelect.addEventListener('change', () => {
+            if (!parcelSelect) return;
+            const parcels = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value).map(f => f.properties.PARCEL_NO))].filter(Boolean).sort((a,b) => a-b);
+            populateSelect(parcelSelect, parcels, "Select Parcel No.");
+            parcelSelect.disabled = false;
+        });
+    }
 
-    parcelSelect.addEventListener('change', () => searchBtn.disabled = !parcelSelect.value);
+    if (parcelSelect && searchBtn) {
+        parcelSelect.addEventListener('change', () => searchBtn.disabled = !parcelSelect.value);
+    }
 }
 
 function populateSelect(el, items, placeholder) {
+    if (!el) return;
     el.innerHTML = `<option value="">${placeholder}</option>`;
     items.forEach(i => el.innerHTML += `<option value="${i}">${i}</option>`);
 }
-function resetSelects(els) { els.forEach(el => { el.innerHTML = `<option value="">Pending...</option>`; el.disabled = true; }); searchBtn.disabled = true; }
+
+function resetSelects(els) { 
+    els.forEach(el => { 
+        if (el) { el.innerHTML = `<option value="">Pending...</option>`; el.disabled = true; }
+    }); 
+    if (searchBtn) searchBtn.disabled = true; 
+}
 
 function convertToBKDK(sqMeters) {
     const sqFt = sqMeters * 10.7639104; 
@@ -136,26 +182,33 @@ function convertToBKDK(sqMeters) {
 }
 
 // Search Logic
-searchBtn.addEventListener('click', () => {
-    activeFeatureData = geojsonData.find(f => 
-        f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value &&
-        f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
-    );
+if (searchBtn) {
+    searchBtn.addEventListener('click', () => {
+        activeFeatureData = geojsonData.find(f => 
+            f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value &&
+            f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
+        );
 
-    if (activeFeatureData) {
-        generateSheetLayer(); 
-        renderMap(activeFeatureData);
-        
-        splitForm.classList.add('hidden');
-        splitResultsLayer.clearLayers();
-        splitAreaInput.value = '';
+        if (activeFeatureData) {
+            generateSheetLayer(); 
+            renderMap(activeFeatureData);
+            
+            if (splitForm) splitForm.classList.add('hidden');
+            splitResultsLayer.clearLayers();
+            if (splitAreaInput) splitAreaInput.value = '';
 
-        document.getElementById('results-panel').classList.remove('hidden');
-        document.getElementById('res-area').innerText = convertToBKDK(turf.area(activeFeatureData));
-        document.getElementById('res-lu').innerText = activeFeatureData.properties.LU_ZONE_082 || 'N/A';
-        closeSidebarOnMobile();
-    }
-});
+            const resPanel = document.getElementById('results-panel');
+            const resArea = document.getElementById('res-area');
+            const resLu = document.getElementById('res-lu');
+
+            if (resPanel) resPanel.classList.remove('hidden');
+            if (resArea) resArea.innerText = convertToBKDK(turf.area(activeFeatureData));
+            if (resLu) resLu.innerText = activeFeatureData.properties.LU_ZONE_082 || 'N/A';
+            
+            closeSidebarOnMobile();
+        }
+    });
+}
 
 function generateSheetLayer() {
     mapSheetLayer.clearLayers();
@@ -194,7 +247,7 @@ function renderMap(feature) {
 }
 
 // ==========================================
-// NEW: Advanced Parcel Split Algorithm 
+// Advanced Parcel Split Algorithm 
 // ==========================================
 
 function parseBKDKToSqM(input) {
@@ -204,61 +257,64 @@ function parseBKDKToSqM(input) {
     return (b * 6772.63) + (k * 338.63) + (d * 16.93) + (kan * 1.058);
 }
 
-executeSplitBtn.addEventListener('click', () => {
-    splitError.classList.add('hidden');
-    splitResultsLayer.clearLayers();
+if (executeSplitBtn) {
+    executeSplitBtn.addEventListener('click', () => {
+        if(splitError) splitError.classList.add('hidden');
+        splitResultsLayer.clearLayers();
 
-    if (!activeFeatureData) return;
+        if (!activeFeatureData) return;
 
-    const targetAreaSqM = parseBKDKToSqM(splitAreaInput.value);
-    if (!targetAreaSqM) {
-        splitError.innerText = "Invalid format. Use B-K-D or B-K-D-K (e.g. 0-1-5-0)";
-        splitError.classList.remove('hidden');
-        return;
-    }
-
-    const totalAreaSqM = turf.area(activeFeatureData);
-    if (targetAreaSqM >= totalAreaSqM || targetAreaSqM <= 0) {
-        splitError.innerText = `Target area must be between 0 and total area (${convertToBKDK(totalAreaSqM)}).`;
-        splitError.classList.remove('hidden');
-        return;
-    }
-
-    // Execute the split
-    const direction = splitDirSelect.value;
-    const cutPoly = performSplit(activeFeatureData, targetAreaSqM, direction);
-
-    if (cutPoly) {
-        // Fade the original parcel
-        if (currentParcelLayer) {
-            currentParcelLayer.setStyle({ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 });
+        const targetAreaSqM = parseBKDKToSqM(splitAreaInput.value);
+        if (!targetAreaSqM) {
+            if(splitError) {
+                splitError.innerText = "Invalid format. Use B-K-D or B-K-D-K (e.g. 0-1-5-0)";
+                splitError.classList.remove('hidden');
+            }
+            return;
         }
 
-        // Render the cut portion in distinct orange
-        L.geoJSON(cutPoly, {
-            style: { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }
-        }).bindPopup(`
-            <div class="font-bold text-orange-700 text-xs">Severed Parcel</div>
-            <div class="text-xs">Area: ${convertToBKDK(turf.area(cutPoly))}</div>
-        `).addTo(splitResultsLayer);
-        
-        // Re-draw labels if toggled
-        if (isLabelsVisible) {
-            drawBoundaryLengths(activeFeatureData);
-            drawBoundaryLengths(cutPoly);
+        const totalAreaSqM = turf.area(activeFeatureData);
+        if (targetAreaSqM >= totalAreaSqM || targetAreaSqM <= 0) {
+            if(splitError) {
+                splitError.innerText = `Target area must be between 0 and total area (${convertToBKDK(totalAreaSqM)}).`;
+                splitError.classList.remove('hidden');
+            }
+            return;
         }
-        closeSidebarOnMobile();
-    } else {
-        splitError.innerText = "Mathematical split failed on this complex geometry.";
-        splitError.classList.remove('hidden');
-    }
-});
+
+        const direction = splitDirSelect.value;
+        const cutPoly = performSplit(activeFeatureData, targetAreaSqM, direction);
+
+        if (cutPoly) {
+            if (currentParcelLayer) {
+                currentParcelLayer.setStyle({ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 });
+            }
+
+            L.geoJSON(cutPoly, {
+                style: { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }
+            }).bindPopup(`
+                <div class="font-bold text-orange-700 text-xs">Severed Parcel</div>
+                <div class="text-xs">Area: ${convertToBKDK(turf.area(cutPoly))}</div>
+            `).addTo(splitResultsLayer);
+            
+            if (isLabelsVisible) {
+                drawBoundaryLengths(activeFeatureData);
+                drawBoundaryLengths(cutPoly);
+            }
+            closeSidebarOnMobile();
+        } else {
+            if(splitError) {
+                splitError.innerText = "Mathematical split failed on this complex geometry.";
+                splitError.classList.remove('hidden');
+            }
+        }
+    });
+}
 
 function performSplit(feature, targetArea, dir) {
     let rotation = 0;
     let sweepDir = dir;
 
-    // To perform diagonal cuts, we temporarily rotate the geographic bounds
     if (dir === 'NE') { rotation = -45; sweepDir = 'N'; }
     if (dir === 'NW') { rotation = 45; sweepDir = 'N'; }
     if (dir === 'SE') { rotation = -45; sweepDir = 'S'; }
@@ -271,7 +327,7 @@ function performSplit(feature, targetArea, dir) {
         workingPoly = turf.transformRotate(feature, rotation, {pivot: center});
     }
 
-    const bbox = turf.bbox(workingPoly); // [minX, minY, maxX, maxY]
+    const bbox = turf.bbox(workingPoly);
     const minX = bbox[0], minY = bbox[1], maxX = bbox[2], maxY = bbox[3];
 
     let low, high, mid;
@@ -281,11 +337,10 @@ function performSplit(feature, targetArea, dir) {
     let resultPoly = null;
     let iter = 0;
     
-    // Sweeping Line Binary Search
     while(iter < 50) {
         mid = (low + high) / 2;
         let cutBox;
-        const pad = 0.005; // Geodesic padding
+        const pad = 0.005; 
 
         if (sweepDir === 'E') cutBox = [mid, minY-pad, maxX+pad, maxY+pad];
         else if (sweepDir === 'W') cutBox = [minX-pad, minY-pad, mid, maxY+pad];
@@ -299,12 +354,11 @@ function performSplit(feature, targetArea, dir) {
         }
 
         const currentArea = turf.area(intersection);
-        if (Math.abs(currentArea - targetArea) <= 1.0) { // 1 sq meter tolerance
+        if (Math.abs(currentArea - targetArea) <= 1.0) { 
             resultPoly = intersection;
             break;
         }
 
-        // Adjust bounds to shrink/grow the box
         if (sweepDir === 'E') currentArea > targetArea ? low = mid : high = mid;
         else if (sweepDir === 'W') currentArea > targetArea ? high = mid : low = mid;
         else if (sweepDir === 'N') currentArea > targetArea ? low = mid : high = mid;
@@ -373,14 +427,15 @@ function groupSegments(ring, tol) {
     return sides;
 }
 
-toggleLabels.addEventListener('change', (e) => {
-    isLabelsVisible = e.target.checked;
-    lengthLabelsLayer.clearLayers();
-    if (isLabelsVisible && activeFeatureData) {
-        drawBoundaryLengths(activeFeatureData);
-        // If there are split layers currently on the map, draw their labels too
-        splitResultsLayer.eachLayer(layer => {
-            drawBoundaryLengths(layer.toGeoJSON());
-        });
-    }
-});
+if (toggleLabels) {
+    toggleLabels.addEventListener('change', (e) => {
+        isLabelsVisible = e.target.checked;
+        lengthLabelsLayer.clearLayers();
+        if (isLabelsVisible && activeFeatureData) {
+            drawBoundaryLengths(activeFeatureData);
+            splitResultsLayer.eachLayer(layer => {
+                drawBoundaryLengths(layer.toGeoJSON());
+            });
+        }
+    });
+}
