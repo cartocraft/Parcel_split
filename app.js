@@ -3,7 +3,7 @@ let map, geojsonData;
 let currentParcelLayer = null;
 let mapSheetLayer = L.layerGroup(); 
 let lengthLabelsLayer = L.layerGroup();
-let splitResultsLayer = L.layerGroup(); // Holds the severed polygon
+let splitResultsLayer = L.layerGroup(); // NEW: Holds the severed polygon
 let isLabelsVisible = false;
 let activeFeatureData = null; 
 
@@ -62,14 +62,13 @@ const searchBtn = document.getElementById('search-btn');
 const toggleLabels = document.getElementById('toggle-labels');
 const sidebar = document.getElementById('sidebar');
 
-// Split Tool Elements
+// NEW: Split Tool Elements
 const splitToggleBtn = document.getElementById('toggle-split-btn');
 const splitForm = document.getElementById('split-form');
 const splitAreaInput = document.getElementById('split-area');
 const splitDirSelect = document.getElementById('split-direction');
 const executeSplitBtn = document.getElementById('execute-split-btn');
 const splitError = document.getElementById('split-error');
-const errorDisplay = document.getElementById('error-message');
 
 function toggleSidebar(show) { sidebar.classList.toggle('-translate-x-full', !show); }
 document.getElementById('toggle-sidebar-btn').addEventListener('click', () => toggleSidebar(true));
@@ -83,34 +82,22 @@ splitToggleBtn.addEventListener('click', () => {
 
 // Load Data
 fetch('./TriyugTopo_v4.json')
-    .then(res => {
-        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
-        return res.json();
-    })
+    .then(res => res.json())
     .then(topology => {
         const objectName = Object.keys(topology.objects)[0];
         geojsonData = topojson.feature(topology, topology.objects[objectName]).features;
         
         geojsonData.forEach(f => {
             if (f.properties && f.properties.WARD != null) {
-                f.properties.WARD = parseInt(f.properties.WARD, 10).toString(); // Removes leading zeros
+                f.properties.WARD = parseInt(f.properties.WARD, 10).toString();
             }
         });
         initializeDropdowns();
-    })
-    .catch(err => {
-        if (errorDisplay) {
-            errorDisplay.textContent = `Data Fetch Error: ${err.message}`;
-            errorDisplay.classList.remove('hidden');
-        }
-        if (vdcSelect) vdcSelect.innerHTML = '<option>Error loading data</option>';
-        console.error(err);
     });
 
 function initializeDropdowns() {
-    // FIXED: Changed from Rem to VDC based on your attribute table
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "Select VDC");
+    populateSelect(vdcSelect, vdcs, "Select Municipality (Rem)");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
@@ -151,7 +138,6 @@ function convertToBKDK(sqMeters) {
 // Search Logic
 searchBtn.addEventListener('click', () => {
     activeFeatureData = geojsonData.find(f => 
-        // FIXED: Changed from Rem to VDC
         f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value &&
         f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
     );
@@ -174,7 +160,6 @@ searchBtn.addEventListener('click', () => {
 function generateSheetLayer() {
     mapSheetLayer.clearLayers();
     const sheetFeatures = geojsonData.filter(f => 
-        // FIXED: Changed from Rem to VDC
         f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
     );
 
@@ -209,7 +194,7 @@ function renderMap(feature) {
 }
 
 // ==========================================
-// Advanced Parcel Split Algorithm 
+// NEW: Advanced Parcel Split Algorithm 
 // ==========================================
 
 function parseBKDKToSqM(input) {
@@ -239,14 +224,17 @@ executeSplitBtn.addEventListener('click', () => {
         return;
     }
 
+    // Execute the split
     const direction = splitDirSelect.value;
     const cutPoly = performSplit(activeFeatureData, targetAreaSqM, direction);
 
     if (cutPoly) {
+        // Fade the original parcel
         if (currentParcelLayer) {
             currentParcelLayer.setStyle({ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 });
         }
 
+        // Render the cut portion in distinct orange
         L.geoJSON(cutPoly, {
             style: { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }
         }).bindPopup(`
@@ -254,6 +242,7 @@ executeSplitBtn.addEventListener('click', () => {
             <div class="text-xs">Area: ${convertToBKDK(turf.area(cutPoly))}</div>
         `).addTo(splitResultsLayer);
         
+        // Re-draw labels if toggled
         if (isLabelsVisible) {
             drawBoundaryLengths(activeFeatureData);
             drawBoundaryLengths(cutPoly);
@@ -269,6 +258,7 @@ function performSplit(feature, targetArea, dir) {
     let rotation = 0;
     let sweepDir = dir;
 
+    // To perform diagonal cuts, we temporarily rotate the geographic bounds
     if (dir === 'NE') { rotation = -45; sweepDir = 'N'; }
     if (dir === 'NW') { rotation = 45; sweepDir = 'N'; }
     if (dir === 'SE') { rotation = -45; sweepDir = 'S'; }
@@ -281,7 +271,7 @@ function performSplit(feature, targetArea, dir) {
         workingPoly = turf.transformRotate(feature, rotation, {pivot: center});
     }
 
-    const bbox = turf.bbox(workingPoly);
+    const bbox = turf.bbox(workingPoly); // [minX, minY, maxX, maxY]
     const minX = bbox[0], minY = bbox[1], maxX = bbox[2], maxY = bbox[3];
 
     let low, high, mid;
@@ -291,10 +281,11 @@ function performSplit(feature, targetArea, dir) {
     let resultPoly = null;
     let iter = 0;
     
+    // Sweeping Line Binary Search
     while(iter < 50) {
         mid = (low + high) / 2;
         let cutBox;
-        const pad = 0.005; 
+        const pad = 0.005; // Geodesic padding
 
         if (sweepDir === 'E') cutBox = [mid, minY-pad, maxX+pad, maxY+pad];
         else if (sweepDir === 'W') cutBox = [minX-pad, minY-pad, mid, maxY+pad];
@@ -308,11 +299,12 @@ function performSplit(feature, targetArea, dir) {
         }
 
         const currentArea = turf.area(intersection);
-        if (Math.abs(currentArea - targetArea) <= 1.0) { 
+        if (Math.abs(currentArea - targetArea) <= 1.0) { // 1 sq meter tolerance
             resultPoly = intersection;
             break;
         }
 
+        // Adjust bounds to shrink/grow the box
         if (sweepDir === 'E') currentArea > targetArea ? low = mid : high = mid;
         else if (sweepDir === 'W') currentArea > targetArea ? high = mid : low = mid;
         else if (sweepDir === 'N') currentArea > targetArea ? low = mid : high = mid;
@@ -386,6 +378,7 @@ toggleLabels.addEventListener('change', (e) => {
     lengthLabelsLayer.clearLayers();
     if (isLabelsVisible && activeFeatureData) {
         drawBoundaryLengths(activeFeatureData);
+        // If there are split layers currently on the map, draw their labels too
         splitResultsLayer.eachLayer(layer => {
             drawBoundaryLengths(layer.toGeoJSON());
         });
