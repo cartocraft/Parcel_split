@@ -1,0 +1,21 @@
+/* Ensure the map takes up the full available space */
+#map { 
+    height: 100%; 
+    width: 100%; 
+    min-height: 400px; 
+    z-index: 1;
+}
+
+/* Custom styling for Turf.js generated distance labels */
+.length-label {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid #4b5563; /* Gray-600 */
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #d97706; /* Amber-600 */
+    white-space: nowrap;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
