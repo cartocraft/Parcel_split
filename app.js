@@ -247,7 +247,7 @@ function renderMap(feature) {
 }
 
 // ==========================================
-// Advanced Parcel Split Algorithm 
+// Advanced Parcel Split Algorithm (Parallel Edge & L-Shape Sweep)
 // ==========================================
 
 function parseBKDKToSqM(input) {
@@ -311,67 +311,132 @@ if (executeSplitBtn) {
     });
 }
 
-function performSplit(feature, targetArea, dir) {
-    let rotation = 0;
-    let sweepDir = dir;
+// Utility: Safely extract outer ring for MultiPolygons and Polygons
+function getOuterRing(feature) {
+    if (feature.geometry.type === 'Polygon') return feature.geometry.coordinates[0];
+    if (feature.geometry.type === 'MultiPolygon') return feature.geometry.coordinates[0][0];
+    return [];
+}
 
-    if (dir === 'NE') { rotation = -45; sweepDir = 'N'; }
-    if (dir === 'NW') { rotation = 45; sweepDir = 'N'; }
-    if (dir === 'SE') { rotation = -45; sweepDir = 'S'; }
-    if (dir === 'SW') { rotation = 45; sweepDir = 'S'; }
-
-    let workingPoly = feature;
-    const center = turf.centerOfMass(feature);
+// 1. Parallel Edge Sweeper (Cardinal)
+function getCardinalSweeper(feature, dir, d) {
+    const coords = getOuterRing(feature);
+    let maxVal = -Infinity;
+    let bestA = null, bestB = null;
     
-    if (rotation !== 0) {
-        workingPoly = turf.transformRotate(feature, rotation, {pivot: center});
-    }
-
-    const bbox = turf.bbox(workingPoly);
-    const minX = bbox[0], minY = bbox[1], maxX = bbox[2], maxY = bbox[3];
-
-    let low, high, mid;
-    if (sweepDir === 'E' || sweepDir === 'W') { low = minX; high = maxX; }
-    else { low = minY; high = maxY; }
-
-    let resultPoly = null;
-    let iter = 0;
-    
-    while(iter < 50) {
-        mid = (low + high) / 2;
-        let cutBox;
-        const pad = 0.005; 
-
-        if (sweepDir === 'E') cutBox = [mid, minY-pad, maxX+pad, maxY+pad];
-        else if (sweepDir === 'W') cutBox = [minX-pad, minY-pad, mid, maxY+pad];
-        else if (sweepDir === 'N') cutBox = [minX-pad, mid, maxX+pad, maxY+pad];
-        else if (sweepDir === 'S') cutBox = [minX-pad, minY-pad, maxX+pad, mid];
-
-        const intersection = turf.bboxClip(workingPoly, cutBox);
-        if (!intersection || intersection.geometry.coordinates.length === 0) {
-            if (sweepDir === 'E' || sweepDir === 'N') high = mid; else low = mid;
-            iter++; continue;
-        }
-
-        const currentArea = turf.area(intersection);
-        if (Math.abs(currentArea - targetArea) <= 1.0) { 
-            resultPoly = intersection;
-            break;
-        }
-
-        if (sweepDir === 'E') currentArea > targetArea ? low = mid : high = mid;
-        else if (sweepDir === 'W') currentArea > targetArea ? high = mid : low = mid;
-        else if (sweepDir === 'N') currentArea > targetArea ? low = mid : high = mid;
-        else if (sweepDir === 'S') currentArea > targetArea ? high = mid : low = mid;
+    // Find the furthest edge in the selected direction
+    for (let i = 0; i < coords.length - 1; i++) {
+        let A = coords[i], B = coords[i+1];
+        let midX = (A[0] + B[0]) / 2, midY = (A[1] + B[1]) / 2;
+        let val;
         
-        resultPoly = intersection;
-        iter++;
+        if (dir === 'N') val = midY;
+        if (dir === 'S') val = -midY;
+        if (dir === 'E') val = midX;
+        if (dir === 'W') val = -midX;
+        
+        if (val > maxVal) { 
+            maxVal = val; bestA = A; bestB = B; 
+        }
     }
+    
+    let dx = bestB[0] - bestA[0], dy = bestB[1] - bestA[1];
+    let len = Math.sqrt(dx*dx + dy*dy);
+    let ux = dx / len, uy = dy / len;
+    
+    // Calculate perpendicular vector pointing inward
+    let nx = -uy, ny = ux;
+    const centroid = turf.centerOfMass(feature).geometry.coordinates;
+    let cx = centroid[0] - bestA[0], cy = centroid[1] - bestA[1];
+    if (nx * cx + ny * cy < 0) { nx = -nx; ny = -ny; }
+    
+    // Create massive rectangle parallel to edge
+    let P1 = [bestA[0] - 2 * ux, bestA[1] - 2 * uy]; // Extend infinitely backward
+    let P2 = [bestB[0] + 2 * ux, bestB[1] + 2 * uy]; // Extend infinitely forward
+    let P3 = [P2[0] + d * nx, P2[1] + d * ny];       // Push inward by d
+    let P4 = [P1[0] + d * nx, P1[1] + d * ny];
+    
+    return turf.polygon([[P1, P2, P3, P4, P1]]);
+}
 
-    if (rotation !== 0 && resultPoly) {
-        resultPoly = turf.transformRotate(resultPoly, -rotation, {pivot: center});
+// 2. L-Formation Sweeper (Corner)
+function getCornerSweeper(feature, dir, d) {
+    const coords = getOuterRing(feature);
+    let maxVal = -Infinity;
+    let bestIdx = -1;
+    
+    // Find the extreme corner vertex
+    for (let i = 0; i < coords.length - 1; i++) {
+        let x = coords[i][0], y = coords[i][1];
+        let val;
+        if (dir === 'NE') val = x + y;
+        if (dir === 'SW') val = -(x + y);
+        if (dir === 'NW') val = -x + y;
+        if (dir === 'SE') val = x - y;
+        if (val > maxVal) { maxVal = val; bestIdx = i; }
     }
+    
+    // Identify adjacent vertices to form the "L"
+    let prevIdx = bestIdx === 0 ? coords.length - 2 : bestIdx - 1;
+    let nextIdx = bestIdx === coords.length - 1 ? 1 : bestIdx + 1;
+    
+    let C = coords[bestIdx], A = coords[prevIdx], B = coords[nextIdx];
+    
+    let vA = [A[0] - C[0], A[1] - C[1]];
+    let vB = [B[0] - C[0], B[1] - C[1]];
+    
+    // Normalize adjacent edge vectors
+    let lenA = Math.sqrt(vA[0]*vA[0] + vA[1]*vA[1]);
+    let lenB = Math.sqrt(vB[0]*vB[0] + vB[1]*vB[1]);
+    let uA = [vA[0]/lenA, vA[1]/lenA];
+    let uB = [vB[0]/lenB, vB[1]/lenB];
+    
+    // Construct expanding parallelogram tracking adjacent edge angles
+    let P1 = C;
+    let P2 = [C[0] + d * uA[0], C[1] + d * uA[1]];
+    let P3 = [C[0] + d * uA[0] + d * uB[0], C[1] + d * uA[1] + d * uB[1]];
+    let P4 = [C[0] + d * uB[0], C[1] + d * uB[1]];
+    
+    return turf.polygon([[P1, P2, P3, P4, P1]]);
+}
 
+function performSplit(feature, targetArea, dir) {
+    let low = 0;
+    let high = 0.05; // ~5km radius, sufficient for any parcel
+    let resultPoly = null;
+    
+    // Binary Search to sweep line inward until target area matches
+    for (let iter = 0; iter < 60; iter++) {
+        let mid = (low + high) / 2;
+        let sweeperBox;
+        
+        if (['N', 'S', 'E', 'W'].includes(dir)) {
+            sweeperBox = getCardinalSweeper(feature, dir, mid);
+        } else {
+            sweeperBox = getCornerSweeper(feature, dir, mid);
+        }
+        
+        let intersection = null;
+        try { 
+            intersection = turf.intersect(feature, sweeperBox); 
+        } catch(e) { }
+
+        let currentArea = intersection ? turf.area(intersection) : 0;
+        
+        if (Math.abs(currentArea - targetArea) <= 1.0 && intersection) { 
+            resultPoly = intersection; 
+            break; 
+        }
+        
+        if (currentArea > targetArea) {
+            high = mid; // Box too big, pull back
+        } else {
+            low = mid;  // Box too small, push forward
+        }
+        
+        if (intersection) resultPoly = intersection;
+    }
+    
     return resultPoly;
 }
 
