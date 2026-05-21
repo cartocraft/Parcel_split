@@ -38,3 +38,56 @@
     text-align: center;
     pointer-events: none; /* Lets mouse clicks pass through to the polygon */
 }
+
+/* ==========================================
+   Mobile Safe-Area Fixes for Leaflet Controls
+   ========================================== */
+
+/* Add a natural bumper for devices with bottom swipe indicators (e.g., iPhones) */
+.leaflet-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 10px);
+}
+
+/* Adjustments specifically for mobile screens */
+@media (max-width: 768px) {
+    /* Push the Layers Panel (bottom right) up above the browser bar */
+    .leaflet-bottom.leaflet-right {
+        bottom: 45px !important; 
+    }
+
+    /* Push the Scale Controls (bottom center) up */
+    .leaflet-bottom.leaflet-center {
+        bottom: 45px !important; 
+    }
+
+    /* (Optional) Make the layers button slightly larger for touch targets */
+    .leaflet-control-layers-toggle {
+        width: 44px !important;
+        height: 44px !important;
+        background-size: 30px 30px !important;
+    }
+}
+
+/* ==========================================
+   Custom Bottom-Center Container Styling
+   (Ensures your scales are stacked neatly)
+   ========================================== */
+.leaflet-bottom.leaflet-center {
+    position: absolute;
+    bottom: 20px; /* Default height for desktop */
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none; /* Allows clicking the map through the invisible container */
+    z-index: 1000;
+}
+
+/* Re-enable clicking on the actual scale controls */
+.leaflet-bottom.leaflet-center .leaflet-control {
+    pointer-events: auto; 
+    margin-bottom: 6px;
+    margin-left: 0;
+    margin-right: 0;
+}
