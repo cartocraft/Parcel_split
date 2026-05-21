@@ -124,13 +124,13 @@ function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
 
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "Select Municipality");
+    populateSelect(vdcSelect, vdcs, "साविक गा.वि.स. छान्नुस");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
         if (!wardSelect) return;
         const wards = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
-        populateSelect(wardSelect, wards, "साविक वडा नं");
+        populateSelect(wardSelect, wards, "साविक वडा नं छान्नुस");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
     });
