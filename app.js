@@ -36,7 +36,7 @@ L.control.layers({
     "ESRI World Imagery": esriSat,
     "OpenStreetMap (Standard)": osmLayer
 }, {
-    "Map Sheet": mapSheetLayer, // <--- FIXED: Added missing comma here
+    "Map Sheet": mapSheetLayer,
     "Parcel Labels (कित्ता नं)": parcelLabelsLayer
 }, { position: 'bottomright', collapsed: true }).addTo(map);
 
@@ -63,16 +63,15 @@ map.on('zoomend moveend', () => numScale.update(map));
 lengthLabelsLayer.addTo(map);
 splitResultsLayer.addTo(map);
 
-// UI Elements (Safely mapped)
+// UI Elements 
 const vdcSelect = document.getElementById('vdc-select');
 const wardSelect = document.getElementById('ward-select');
 const sheetSelect = document.getElementById('sheet-select');
 const parcelSelect = document.getElementById('parcel-select');
 const searchBtn = document.getElementById('search-btn');
-const toggleLabels = document.getElementById('toggle-labels');
 const sidebar = document.getElementById('sidebar');
 
-// Split Tool Elements (Safely mapped)
+// Split Tool Elements
 const splitToggleBtn = document.getElementById('toggle-split-btn');
 const splitForm = document.getElementById('split-form');
 const splitAreaInput = document.getElementById('split-area');
@@ -130,19 +129,20 @@ fetch('./TriyugTopo_v4.json')
 function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
 
-    // Use VDC or Rem defensively
-    const vdcs = [...new Set(geojsonData.map(f =>  f.properties.Rem))].filter(Boolean).sort();
+    // CHANGED: Explicitly using Rem attribute
+    const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
     
     if (vdcs.length === 0) {
-        console.warn("WARNING: No VDC attributes found in the dataset! Check column names.");
+        console.warn("WARNING: No 'Rem' attributes found in the dataset! Check column names.");
     }
 
-    populateSelect(vdcSelect, vdcs, "Select VDC");
+    populateSelect(vdcSelect, vdcs, "Select Municipality");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
         if (!wardSelect) return;
-        const wards = [...new Set(geojsonData.filter(f => ( f.properties.Rem) === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
+        // CHANGED: Filter by Rem
+        const wards = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
         populateSelect(wardSelect, wards, "Select Ward No.");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
@@ -151,7 +151,8 @@ function initializeDropdowns() {
     if (wardSelect) {
         wardSelect.addEventListener('change', () => {
             if (!sheetSelect) return;
-            const sheets = [...new Set(geojsonData.filter(f => ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
+            // CHANGED: Filter by Rem
+            const sheets = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
             populateSelect(sheetSelect, sheets, "Select Sheet No.");
             sheetSelect.disabled = false;
             resetSelects([parcelSelect]);
@@ -162,8 +163,9 @@ function initializeDropdowns() {
         sheetSelect.addEventListener('change', () => {
             if (!parcelSelect) return;
             
+            // CHANGED: Filter by Rem
             const parcels = [...new Set(geojsonData
-                .filter(f => ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
+                .filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
                 .map(f => f.properties.PARCEL_NO))]
                 .filter(p => p !== null && p !== undefined && p !== '')
                 .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
@@ -178,7 +180,6 @@ function initializeDropdowns() {
                 });
             }
 
-            // Fallback for standard <select> if datalist is not being used
             if (parcelSelect.tagName === 'SELECT') {
                 populateSelect(parcelSelect, parcels, "Select Parcel No.");
             } else {
@@ -226,8 +227,9 @@ function convertToBKDK(sqMeters) {
 // Search Logic
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
+        // CHANGED: Filter by Rem
         activeFeatureData = geojsonData.find(f => 
-            ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value &&
+            f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value &&
             f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
         );
 
@@ -254,8 +256,9 @@ if (searchBtn) {
 
 function generateSheetLayer() {
     mapSheetLayer.clearLayers();
+    // CHANGED: Filter by Rem
     const sheetFeatures = geojsonData.filter(f => 
-        ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
+        f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
     );
     
     currentSheetFeatures = sheetFeatures; 
@@ -538,7 +541,7 @@ function groupSegments(ring, tol) {
 }
 
 // ==========================================
-// Dynamic Smart Labeling Engine
+// Dynamic Smart Labeling Engine (With Arrowheads)
 // ==========================================
 function renderSmartLabels() {
     parcelLabelsLayer.clearLayers();
@@ -571,14 +574,14 @@ function renderSmartLabels() {
         // Keep text right-side up
         if (angle > 90 || angle < -90) angle += 180; 
 
-        // 2. Size Check for Leader Lines (Calculate visual width of polygon on screen)
+        // 2. Size Check for Leader Lines
         const bbox = turf.bbox(feature);
         const swScreen = map.project([bbox[1], bbox[0]]);
         const neScreen = map.project([bbox[3], bbox[2]]);
         const pixelWidth = Math.abs(neScreen.x - swScreen.x);
         const pixelHeight = Math.abs(swScreen.y - neScreen.y);
         
-        const isSmall = pixelWidth < 35 || pixelHeight < 20; // If smaller than a text box
+        const isSmall = pixelWidth < 35 || pixelHeight < 20; 
         
         let labelScreenPt = centerScreen;
         let needsLeader = false;
@@ -593,26 +596,57 @@ function renderSmartLabels() {
 
         if (hasCollision || isSmall) {
             // Push label up and right
-            labelScreenPt = L.point(centerScreen.x + 30, centerScreen.y - 30);
+            labelScreenPt = L.point(centerScreen.x + 35, centerScreen.y - 35);
             box = { minX: labelScreenPt.x - halfW, maxX: labelScreenPt.x + halfW, minY: labelScreenPt.y - halfH, maxY: labelScreenPt.y + halfH };
             needsLeader = true;
             angle = 0; // Force horizontal text for leader lines
             
-            // Re-check collision after moving. If it STILL hits something, drop it to prevent clutter.
+            // Re-check collision
             let stillCollides = placedBoxes.some(b => !(box.maxX < b.minX || box.minX > b.maxX || box.maxY < b.minY || box.minY > b.maxY));
             if (stillCollides) return; 
         }
         
-        placedBoxes.push(box); // Register this space as taken
+        placedBoxes.push(box); 
 
         const labelLatLng = map.unproject(labelScreenPt);
         const centerLatLng = map.unproject(centerScreen);
 
-        // Draw Leader Line if needed
+        // Draw Leader Line with Arrowhead
         if (needsLeader) {
-            L.polyline([centerLatLng, labelLatLng], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
-            L.polyline([centerLatLng, labelLatLng], { color: '#374151', weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
+            // Calculate the angle of the leader line
+            const lineAngle = Math.atan2(labelScreenPt.y - centerScreen.y, labelScreenPt.x - centerScreen.x);
+            
+            // Pull the arrowhead back 16 pixels so it doesn't cross over the text
+            const tipScreen = L.point(
+                labelScreenPt.x - 16 * Math.cos(lineAngle),
+                labelScreenPt.y - 16 * Math.sin(lineAngle)
+            );
+            const tipLatLng = map.unproject(tipScreen);
+
+            // Draw the main dashed line
+            L.polyline([centerLatLng, tipLatLng], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
+            L.polyline([centerLatLng, tipLatLng], { color: '#374151', weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
             L.circleMarker(centerLatLng, { radius: 2, color: '#374151', fillColor: '#fff', fillOpacity: 1, weight: 1, interactive: false }).addTo(parcelLabelsLayer);
+
+            // Calculate Arrowhead coordinates (30 degree swept wings)
+            const arrowLen = 8; 
+            const sweepAngle = Math.PI / 6; // 30 degrees
+            
+            const p1Screen = L.point(
+                tipScreen.x - arrowLen * Math.cos(lineAngle - sweepAngle),
+                tipScreen.y - arrowLen * Math.sin(lineAngle - sweepAngle)
+            );
+            const p2Screen = L.point(
+                tipScreen.x - arrowLen * Math.cos(lineAngle + sweepAngle),
+                tipScreen.y - arrowLen * Math.sin(lineAngle + sweepAngle)
+            );
+
+            const p1 = map.unproject(p1Screen);
+            const p2 = map.unproject(p2Screen);
+
+            // Draw the "V" shape for the arrowhead
+            L.polyline([p1, tipLatLng, p2], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
+            L.polyline([p1, tipLatLng, p2], { color: '#374151', weight: 1.5, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
         }
 
         // Draw Text
@@ -631,15 +665,23 @@ function renderSmartLabels() {
 map.on('zoomend', () => renderSmartLabels()); // Recalculate collisions based on new zoom scale
 parcelLabelsLayer.on('add', () => renderSmartLabels()); // Draw when checkbox is clicked
 
-if (toggleLabels) {
-    toggleLabels.addEventListener('change', (e) => {
-        isLabelsVisible = e.target.checked;
-        lengthLabelsLayer.clearLayers();
-        if (isLabelsVisible && activeFeatureData) {
-            drawBoundaryLengths(activeFeatureData);
+// Listen to the Layers Panel for Boundary Lengths toggle
+map.on('overlayadd', function(e) {
+    if (e.layer === lengthLabelsLayer) {
+        isLabelsVisible = true;
+        lengthLabelsLayer.clearLayers(); 
+        if (activeFeatureData) {
+            drawBoundaryLengths(activeFeatureData); 
             splitResultsLayer.eachLayer(layer => {
-                drawBoundaryLengths(layer.toGeoJSON());
+                drawBoundaryLengths(layer.toGeoJSON()); 
             });
         }
-    });
-}
+    }
+});
+
+map.on('overlayremove', function(e) {
+    if (e.layer === lengthLabelsLayer) {
+        isLabelsVisible = false;
+        lengthLabelsLayer.clearLayers(); 
+    }
+});
