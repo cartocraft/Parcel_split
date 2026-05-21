@@ -7,18 +7,41 @@ let splitResultsLayer = L.layerGroup();
 let isLabelsVisible = false;
 let activeFeatureData = null; 
 let parcelLabelsLayer = L.layerGroup(); 
-let currentSheetFeatures = []; // Stores features for dynamic zoom labeling
+let currentSheetFeatures = []; 
+let currentTheme = 'satellite'; // Tracks active theme for colors
+
+// --- Dynamic CSS Injection for Theme Swapping ---
+const themeStyles = document.createElement('style');
+themeStyles.innerHTML = `
+    /* Default Length Labels (Satellite Mode) */
+    .length-label {
+        color: #ffffff;
+        font-weight: bold;
+        font-size: 11.5px;
+        font-family: Arial, sans-serif;
+        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+    }
+    /* Clean Theme (None Layer Mode) Overrides */
+    .clean-theme .parcel-label {
+        color: #0f172a !important; /* Very Dark Blue/Black */
+        text-shadow: -1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff !important;
+    }
+    .clean-theme .length-label {
+        color: #b91c1c !important; /* Crisp Red for measurements */
+        text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff !important;
+    }
+`;
+document.head.appendChild(themeStyles);
+// ------------------------------------------------
 
 // 1. Define Base Layers
 const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
 const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
 const googleHybrid = L.tileLayer('http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
-
-// ESRI World Imagery Reference
 const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
-    attribution: '&copy; Esri &mdash; Source: Esri'
+    maxZoom: 19, attribution: '&copy; Esri'
 });
+const noneLayer = L.layerGroup(); // Blank layer for clean background
 
 // Initialize Map Control
 map = L.map('map', {
@@ -30,12 +53,13 @@ map = L.map('map', {
 
 map._controlCorners.bottomcenter = L.DomUtil.create('div', 'leaflet-bottom leaflet-center', map._controlContainer);
 
-// Layer Switching UI Config (Fixed Syntax Error & Added Length Controls)
+// Layer Switching UI Config 
 L.control.layers({
     "Google Hybrid (Sat + Labels)": googleHybrid,
     "Google Satellite (Imagery Only)": googleSat,
     "ESRI World Imagery": esriSat,
-    "OpenStreetMap (Standard)": osmLayer
+    "OpenStreetMap (Standard)": osmLayer,
+    "None (खाली पृष्ठभूमि)": noneLayer // <-- Added Blank Layer
 }, {
     "Map Sheet": mapSheetLayer,
     "Parcel Labels (कित्ता नं)": parcelLabelsLayer,
@@ -48,8 +72,7 @@ const NumScaleControl = L.Control.extend({
     options: { position: 'bottomcenter' },
     onAdd: function (map) {
         this._div = L.DomUtil.create('div', 'numerical-scale');
-        this.update(map);
-        return this._div;
+        this.update(map); return this._div;
     },
     update: function (map) {
         const y = map.getCenter().lat;
@@ -64,6 +87,61 @@ map.on('zoomend moveend', () => numScale.update(map));
 
 splitResultsLayer.addTo(map);
 
+// ==========================================
+// Theme Engine (Handles Colors based on Basemap)
+// ==========================================
+function getSheetStyle() {
+    return currentTheme === 'clean' 
+        ? { color: '#64748b', weight: 1.5, fillColor: '#e2e8f0', fillOpacity: 0.2 } // High contrast slate
+        : { color: '#FFEA00', weight: 1.5, fillColor: '#FFEA00', fillOpacity: 0.05 }; // Yellow
+}
+function getActiveParcelStyle() {
+    return currentTheme === 'clean'
+        ? { color: '#1d4ed8', weight: 3.5, fillColor: '#3b82f6', fillOpacity: 0.15 } // Deep blue
+        : { color: '#00FFFF', weight: 4, fillColor: '#00FFFF', fillOpacity: 0.25 }; // Cyan
+}
+function getFadedParcelStyle() {
+    return currentTheme === 'clean'
+        ? { color: '#94a3b8', fillColor: '#cbd5e1', fillOpacity: 0.3, weight: 2 } // Grayed out
+        : { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }; // Faded blue
+}
+function getSplitStyle() {
+    return currentTheme === 'clean'
+        ? { color: '#b91c1c', weight: 3, fillColor: '#ef4444', fillOpacity: 0.3 } // Red for cut
+        : { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }; // Orange
+}
+
+function applyTheme(theme) {
+    currentTheme = theme;
+    
+    // Update existing layers dynamically
+    mapSheetLayer.eachLayer(l => l.setStyle(getSheetStyle()));
+    if (currentParcelLayer) currentParcelLayer.setStyle(getActiveParcelStyle());
+    splitResultsLayer.eachLayer(l => l.setStyle(getSplitStyle()));
+    
+    // Re-render labels so they pick up the new leader-line colors & CSS classes
+    if (map.hasLayer(parcelLabelsLayer)) renderSmartLabels();
+    if (isLabelsVisible && activeFeatureData) {
+        lengthLabelsLayer.clearLayers();
+        drawBoundaryLengths(activeFeatureData);
+        splitResultsLayer.eachLayer(layer => drawBoundaryLengths(layer.toGeoJSON()));
+    }
+}
+
+// Listen for Basemap changes
+map.on('baselayerchange', function(e) {
+    if (e.name === "None (खाली पृष्ठभूमि)") {
+        map.getContainer().style.backgroundColor = '#f8fafc'; // Crisp off-white
+        map.getContainer().classList.add('clean-theme');
+        applyTheme('clean');
+    } else {
+        map.getContainer().style.backgroundColor = '#111827'; // Dark space
+        map.getContainer().classList.remove('clean-theme');
+        applyTheme('satellite');
+    }
+});
+
+
 // UI DOM Accessors
 const vdcSelect = document.getElementById('vdc-select');
 const wardSelect = document.getElementById('ward-select');
@@ -72,7 +150,6 @@ const parcelSelect = document.getElementById('parcel-select');
 const searchBtn = document.getElementById('search-btn');
 const sidebar = document.getElementById('sidebar');
 
-// Advanced Splitter UI Accessors
 const splitToggleBtn = document.getElementById('toggle-split-btn');
 const splitForm = document.getElementById('split-form');
 const splitAreaInput = document.getElementById('split-area');
@@ -86,14 +163,14 @@ document.getElementById('toggle-sidebar-btn').addEventListener('click', () => to
 document.getElementById('close-sidebar-btn').addEventListener('click', () => toggleSidebar(false));
 function closeSidebarOnMobile() { if (window.innerWidth < 768) toggleSidebar(false); }
 
-if (splitToggleBtn && splitForm && splitError) {
+if (splitToggleBtn && splitForm) {
     splitToggleBtn.addEventListener('click', () => {
         splitForm.classList.toggle('hidden');
-        splitError.classList.add('hidden');
+        if(splitError) splitError.classList.add('hidden');
     });
 }
 
-// Database Connection Fetch Pipeline
+// Database Connection
 console.log("Attempting to fetch data...");
 fetch('./TriyugTopo_v4.json')
     .then(res => {
@@ -103,7 +180,6 @@ fetch('./TriyugTopo_v4.json')
     .then(topology => {
         const objectName = Object.keys(topology.objects)[0];
         geojsonData = topojson.feature(topology, topology.objects[objectName]).features;
-        
         geojsonData.forEach(f => {
             if (f.properties && f.properties.WARD != null) {
                 f.properties.WARD = parseInt(f.properties.WARD, 10).toString(); 
@@ -122,15 +198,14 @@ fetch('./TriyugTopo_v4.json')
 
 function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
-
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "साविक गा.वि.स. छान्नुस");
+    populateSelect(vdcSelect, vdcs, "Select Municipality");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
         if (!wardSelect) return;
         const wards = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
-        populateSelect(wardSelect, wards, "साविक वडा नं छान्नुस");
+        populateSelect(wardSelect, wards, "साविक वडा नं");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
     });
@@ -148,7 +223,6 @@ function initializeDropdowns() {
     if (sheetSelect) {
         sheetSelect.addEventListener('change', () => {
             if (!parcelSelect) return;
-            
             const parcels = [...new Set(geojsonData
                 .filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
                 .map(f => f.properties.PARCEL_NO))]
@@ -184,13 +258,11 @@ function resetSelects(els) {
     els.forEach(el => { 
         if (el) { 
             if (el.tagName === 'INPUT') {
-                el.value = ''; 
-                el.disabled = true;
+                el.value = ''; el.disabled = true;
                 const dataList = document.getElementById(el.getAttribute('list'));
                 if (dataList) dataList.innerHTML = ''; 
             } else {
-                el.innerHTML = `<option value="">Pending...</option>`; 
-                el.disabled = true; 
+                el.innerHTML = `<option value="">Pending...</option>`; el.disabled = true; 
             }
         }
     }); 
@@ -203,7 +275,6 @@ function convertToBKDK(sqMeters) {
     return `${Math.floor(totalDhur / 400)}-${Math.floor((totalDhur % 400) / 20)}-${Math.floor(totalDhur % 20)}-${Math.round((totalDhur - Math.floor(totalDhur)) * 16)}`;
 }
 
-// Map Query Activation Hub
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
         activeFeatureData = geojsonData.find(f => 
@@ -242,7 +313,7 @@ function generateSheetLayer() {
     renderSmartLabels();
     
     L.geoJSON({ "type": "FeatureCollection", "features": sheetFeatures }, {
-        style: { color: '#FFEA00', weight: 1.5, fillColor: '#FFEA00', fillOpacity: 0.05 },
+        style: getSheetStyle(),
         onEachFeature: function (feature, layer) {
             layer.on('click', function(e) {
                 const area = convertToBKDK(turf.area(feature));
@@ -262,7 +333,7 @@ function renderMap(feature) {
     lengthLabelsLayer.clearLayers();
 
     currentParcelLayer = L.geoJSON(feature, {
-        style: { color: '#00FFFF', weight: 4, fillColor: '#00FFFF', fillOpacity: 0.25 }
+        style: getActiveParcelStyle()
     }).addTo(map);
 
     currentParcelLayer.bringToFront();
@@ -272,7 +343,7 @@ function renderMap(feature) {
 }
 
 // ==========================================
-// Advanced Parcel Split Algorithm (Parallel Edge & L-Shape Sweep)
+// Advanced Parcel Split Algorithm
 // ==========================================
 function parseBKDKToSqM(input) {
     const parts = input.split('-').map(p => parseFloat(p.trim()));
@@ -311,11 +382,11 @@ if (executeSplitBtn) {
 
         if (cutPoly) {
             if (currentParcelLayer) {
-                currentParcelLayer.setStyle({ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 });
+                currentParcelLayer.setStyle(getFadedParcelStyle());
             }
 
             L.geoJSON(cutPoly, {
-                style: { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }
+                style: getSplitStyle()
             }).bindPopup(`
                 <div class="font-bold text-orange-700 text-xs">Severed Parcel</div>
                 <div class="text-xs">Area: ${convertToBKDK(turf.area(cutPoly))}</div>
@@ -441,7 +512,9 @@ function performSplit(feature, targetArea, dir) {
     return resultPoly;
 }
 
+// ==========================================
 // Rotated Boundary Lengths Engine
+// ==========================================
 function drawBoundaryLengths(feature) {
     const coordinates = turf.getCoords(feature);
     const rings = feature.geometry.type === 'MultiPolygon' ? coordinates.flat(1) : coordinates;
@@ -502,6 +575,10 @@ function renderSmartLabels() {
 
     let placedBoxes = []; 
 
+    // Define leader line colors based on Theme
+    const leaderBg = currentTheme === 'clean' ? '#ffffff' : '#ffffff';
+    const leaderFg = currentTheme === 'clean' ? '#0f172a' : '#374151'; // Darker line in clean mode
+
     currentSheetFeatures.forEach(feature => {
         const pNo = feature.properties.PARCEL_NO;
         if (!pNo) return;
@@ -558,17 +635,17 @@ function renderSmartLabels() {
             const tipScreen = L.point(labelScreenPt.x - 16 * Math.cos(lineAngle), labelScreenPt.y - 16 * Math.sin(lineAngle));
             const tipLatLng = map.unproject(tipScreen);
 
-            L.polyline([centerLatLng, tipLatLng], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
-            L.polyline([centerLatLng, tipLatLng], { color: '#374151', weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
-            L.circleMarker(centerLatLng, { radius: 2, color: '#374151', fillColor: '#fff', fillOpacity: 1, weight: 1, interactive: false }).addTo(parcelLabelsLayer);
+            L.polyline([centerLatLng, tipLatLng], { color: leaderBg, weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
+            L.polyline([centerLatLng, tipLatLng], { color: leaderFg, weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
+            L.circleMarker(centerLatLng, { radius: 2, color: leaderFg, fillColor: '#fff', fillOpacity: 1, weight: 1, interactive: false }).addTo(parcelLabelsLayer);
 
             const arrowLen = 8; 
             const sweepAngle = Math.PI / 6; 
             const p1Screen = L.point(tipScreen.x - arrowLen * Math.cos(lineAngle - sweepAngle), tipScreen.y - arrowLen * Math.sin(lineAngle - sweepAngle));
             const p2Screen = L.point(tipScreen.x - arrowLen * Math.cos(lineAngle + sweepAngle), tipScreen.y - arrowLen * Math.sin(lineAngle + sweepAngle));
 
-            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
-            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: '#374151', weight: 1.5, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
+            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: leaderBg, weight: 4, opacity: 0.8, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
+            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: leaderFg, weight: 1.5, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
         }
 
         const labelIcon = L.divIcon({
