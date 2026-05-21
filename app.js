@@ -14,13 +14,13 @@ const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
 const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
 const googleHybrid = L.tileLayer('http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
 
-// ESRI World Imagery
+// ESRI World Imagery Reference
 const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 19,
     attribution: '&copy; Esri &mdash; Source: Esri'
 });
 
-// Initialize Map
+// Initialize Map Control
 map = L.map('map', {
     center: [26.79, 86.69],
     zoom: 12,
@@ -30,6 +30,7 @@ map = L.map('map', {
 
 map._controlCorners.bottomcenter = L.DomUtil.create('div', 'leaflet-bottom leaflet-center', map._controlContainer);
 
+// Layer Switching UI Config (Fixed Syntax Error & Added Length Controls)
 L.control.layers({
     "Google Hybrid (Sat + Labels)": googleHybrid,
     "Google Satellite (Imagery Only)": googleSat,
@@ -37,7 +38,8 @@ L.control.layers({
     "OpenStreetMap (Standard)": osmLayer
 }, {
     "Map Sheet": mapSheetLayer,
-    "Parcel Labels (कित्ता नं)": parcelLabelsLayer
+    "Parcel Labels (कित्ता नं)": parcelLabelsLayer,
+    "Boundary Lengths (जग्गाको नाप)": lengthLabelsLayer
 }, { position: 'bottomright', collapsed: true }).addTo(map);
 
 L.control.scale({ position: 'bottomcenter', imperial: false, maxWidth: 150 }).addTo(map);
@@ -60,10 +62,9 @@ const numScale = new NumScaleControl();
 map.addControl(numScale);
 map.on('zoomend moveend', () => numScale.update(map));
 
-lengthLabelsLayer.addTo(map);
 splitResultsLayer.addTo(map);
 
-// UI Elements 
+// UI DOM Accessors
 const vdcSelect = document.getElementById('vdc-select');
 const wardSelect = document.getElementById('ward-select');
 const sheetSelect = document.getElementById('sheet-select');
@@ -71,7 +72,7 @@ const parcelSelect = document.getElementById('parcel-select');
 const searchBtn = document.getElementById('search-btn');
 const sidebar = document.getElementById('sidebar');
 
-// Split Tool Elements
+// Advanced Splitter UI Accessors
 const splitToggleBtn = document.getElementById('toggle-split-btn');
 const splitForm = document.getElementById('split-form');
 const splitAreaInput = document.getElementById('split-area');
@@ -79,13 +80,10 @@ const splitDirSelect = document.getElementById('split-direction');
 const executeSplitBtn = document.getElementById('execute-split-btn');
 const splitError = document.getElementById('split-error');
 const errorDisplay = document.getElementById('error-message');
-const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
-const closeSidebarBtn = document.getElementById('close-sidebar-btn');
 
-// Safe Sidebar Toggles
 function toggleSidebar(show) { if(sidebar) sidebar.classList.toggle('-translate-x-full', !show); }
-if (toggleSidebarBtn) toggleSidebarBtn.addEventListener('click', () => toggleSidebar(true));
-if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', () => toggleSidebar(false));
+document.getElementById('toggle-sidebar-btn').addEventListener('click', () => toggleSidebar(true));
+document.getElementById('close-sidebar-btn').addEventListener('click', () => toggleSidebar(false));
 function closeSidebarOnMobile() { if (window.innerWidth < 768) toggleSidebar(false); }
 
 if (splitToggleBtn && splitForm && splitError) {
@@ -95,7 +93,7 @@ if (splitToggleBtn && splitForm && splitError) {
     });
 }
 
-// Load Data
+// Database Connection Fetch Pipeline
 console.log("Attempting to fetch data...");
 fetch('./TriyugTopo_v4.json')
     .then(res => {
@@ -103,24 +101,20 @@ fetch('./TriyugTopo_v4.json')
         return res.json();
     })
     .then(topology => {
-        console.log("Data fetched successfully. Parsing TopoJSON...");
         const objectName = Object.keys(topology.objects)[0];
         geojsonData = topojson.feature(topology, topology.objects[objectName]).features;
         
-        console.log(`Successfully parsed ${geojsonData.length} parcels. First parcel properties:`, geojsonData[0].properties);
-
         geojsonData.forEach(f => {
             if (f.properties && f.properties.WARD != null) {
                 f.properties.WARD = parseInt(f.properties.WARD, 10).toString(); 
             }
         });
-        
         initializeDropdowns();
     })
     .catch(err => {
         console.error("FATAL ERROR loading JSON:", err);
         if (errorDisplay) {
-            errorDisplay.textContent = `Data Fetch Error: ${err.message}. Check browser console (F12).`;
+            errorDisplay.textContent = `Data Fetch Error: ${err.message}`;
             errorDisplay.classList.remove('hidden');
         }
         if (vdcSelect) vdcSelect.innerHTML = '<option>Error loading data</option>';
@@ -129,21 +123,14 @@ fetch('./TriyugTopo_v4.json')
 function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
 
-    // CHANGED: Explicitly using Rem attribute
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    
-    if (vdcs.length === 0) {
-        console.warn("WARNING: No 'Rem' attributes found in the dataset! Check column names.");
-    }
-
     populateSelect(vdcSelect, vdcs, "Select Municipality");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
         if (!wardSelect) return;
-        // CHANGED: Filter by Rem
         const wards = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
-        populateSelect(wardSelect, wards, "Select Ward No.");
+        populateSelect(wardSelect, wards, "साविक वडा नं");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
     });
@@ -151,9 +138,8 @@ function initializeDropdowns() {
     if (wardSelect) {
         wardSelect.addEventListener('change', () => {
             if (!sheetSelect) return;
-            // CHANGED: Filter by Rem
             const sheets = [...new Set(geojsonData.filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
-            populateSelect(sheetSelect, sheets, "Select Sheet No.");
+            populateSelect(sheetSelect, sheets, "सिट नं");
             sheetSelect.disabled = false;
             resetSelects([parcelSelect]);
         });
@@ -163,7 +149,6 @@ function initializeDropdowns() {
         sheetSelect.addEventListener('change', () => {
             if (!parcelSelect) return;
             
-            // CHANGED: Filter by Rem
             const parcels = [...new Set(geojsonData
                 .filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
                 .map(f => f.properties.PARCEL_NO))]
@@ -179,19 +164,13 @@ function initializeDropdowns() {
                     dataList.appendChild(option);
                 });
             }
-
-            if (parcelSelect.tagName === 'SELECT') {
-                populateSelect(parcelSelect, parcels, "Select Parcel No.");
-            } else {
-                parcelSelect.value = ''; 
-            }
+            parcelSelect.value = ''; 
             parcelSelect.disabled = false;
         });
     }
 
     if (parcelSelect && searchBtn) {
-        const eventType = parcelSelect.tagName === 'INPUT' ? 'input' : 'change';
-        parcelSelect.addEventListener(eventType, () => searchBtn.disabled = !parcelSelect.value.trim());
+        parcelSelect.addEventListener('input', () => searchBtn.disabled = !parcelSelect.value.trim());
     }
 }
 
@@ -224,10 +203,9 @@ function convertToBKDK(sqMeters) {
     return `${Math.floor(totalDhur / 400)}-${Math.floor((totalDhur % 400) / 20)}-${Math.floor(totalDhur % 20)}-${Math.round((totalDhur - Math.floor(totalDhur)) * 16)}`;
 }
 
-// Search Logic
+// Map Query Activation Hub
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
-        // CHANGED: Filter by Rem
         activeFeatureData = geojsonData.find(f => 
             f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value &&
             f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
@@ -256,7 +234,6 @@ if (searchBtn) {
 
 function generateSheetLayer() {
     mapSheetLayer.clearLayers();
-    // CHANGED: Filter by Rem
     const sheetFeatures = geojsonData.filter(f => 
         f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
     );
@@ -297,7 +274,6 @@ function renderMap(feature) {
 // ==========================================
 // Advanced Parcel Split Algorithm (Parallel Edge & L-Shape Sweep)
 // ==========================================
-
 function parseBKDKToSqM(input) {
     const parts = input.split('-').map(p => parseFloat(p.trim()));
     if (parts.length < 3 || parts.some(isNaN)) return null;
@@ -346,6 +322,7 @@ if (executeSplitBtn) {
             `).addTo(splitResultsLayer);
             
             if (isLabelsVisible) {
+                lengthLabelsLayer.clearLayers();
                 drawBoundaryLengths(activeFeatureData);
                 drawBoundaryLengths(cutPoly);
             }
@@ -359,20 +336,17 @@ if (executeSplitBtn) {
     });
 }
 
-// Utility: Safely extract outer ring for MultiPolygons and Polygons
 function getOuterRing(feature) {
     if (feature.geometry.type === 'Polygon') return feature.geometry.coordinates[0];
     if (feature.geometry.type === 'MultiPolygon') return feature.geometry.coordinates[0][0];
     return [];
 }
 
-// 1. Parallel Edge Sweeper (Cardinal)
 function getCardinalSweeper(feature, dir, d) {
     const coords = getOuterRing(feature);
     let maxVal = -Infinity;
     let bestA = null, bestB = null;
     
-    // Find the furthest edge in the selected direction
     for (let i = 0; i < coords.length - 1; i++) {
         let A = coords[i], B = coords[i+1];
         let midX = (A[0] + B[0]) / 2, midY = (A[1] + B[1]) / 2;
@@ -383,37 +357,31 @@ function getCardinalSweeper(feature, dir, d) {
         if (dir === 'E') val = midX;
         if (dir === 'W') val = -midX;
         
-        if (val > maxVal) { 
-            maxVal = val; bestA = A; bestB = B; 
-        }
+        if (val > maxVal) { maxVal = val; bestA = A; bestB = B; }
     }
     
     let dx = bestB[0] - bestA[0], dy = bestB[1] - bestA[1];
     let len = Math.sqrt(dx*dx + dy*dy);
     let ux = dx / len, uy = dy / len;
     
-    // Calculate perpendicular vector pointing inward
     let nx = -uy, ny = ux;
     const centroid = turf.centerOfMass(feature).geometry.coordinates;
     let cx = centroid[0] - bestA[0], cy = centroid[1] - bestA[1];
     if (nx * cx + ny * cy < 0) { nx = -nx; ny = -ny; }
     
-    // Create massive rectangle parallel to edge
-    let P1 = [bestA[0] - 2 * ux, bestA[1] - 2 * uy]; // Extend infinitely backward
-    let P2 = [bestB[0] + 2 * ux, bestB[1] + 2 * uy]; // Extend infinitely forward
-    let P3 = [P2[0] + d * nx, P2[1] + d * ny];       // Push inward by d
+    let P1 = [bestA[0] - 2 * ux, bestA[1] - 2 * uy]; 
+    let P2 = [bestB[0] + 2 * ux, bestB[1] + 2 * uy]; 
+    let P3 = [P2[0] + d * nx, P2[1] + d * ny];       
     let P4 = [P1[0] + d * nx, P1[1] + d * ny];
     
     return turf.polygon([[P1, P2, P3, P4, P1]]);
 }
 
-// 2. L-Formation Sweeper (Corner)
 function getCornerSweeper(feature, dir, d) {
     const coords = getOuterRing(feature);
     let maxVal = -Infinity;
     let bestIdx = -1;
     
-    // Find the extreme corner vertex
     for (let i = 0; i < coords.length - 1; i++) {
         let x = coords[i][0], y = coords[i][1];
         let val;
@@ -424,22 +392,18 @@ function getCornerSweeper(feature, dir, d) {
         if (val > maxVal) { maxVal = val; bestIdx = i; }
     }
     
-    // Identify adjacent vertices to form the "L"
     let prevIdx = bestIdx === 0 ? coords.length - 2 : bestIdx - 1;
     let nextIdx = bestIdx === coords.length - 1 ? 1 : bestIdx + 1;
     
     let C = coords[bestIdx], A = coords[prevIdx], B = coords[nextIdx];
-    
     let vA = [A[0] - C[0], A[1] - C[1]];
     let vB = [B[0] - C[0], B[1] - C[1]];
     
-    // Normalize adjacent edge vectors
     let lenA = Math.sqrt(vA[0]*vA[0] + vA[1]*vA[1]);
     let lenB = Math.sqrt(vB[0]*vB[0] + vB[1]*vB[1]);
     let uA = [vA[0]/lenA, vA[1]/lenA];
     let uB = [vB[0]/lenB, vB[1]/lenB];
     
-    // Construct expanding parallelogram tracking adjacent edge angles
     let P1 = C;
     let P2 = [C[0] + d * uA[0], C[1] + d * uA[1]];
     let P3 = [C[0] + d * uA[0] + d * uB[0], C[1] + d * uA[1] + d * uB[1]];
@@ -450,10 +414,9 @@ function getCornerSweeper(feature, dir, d) {
 
 function performSplit(feature, targetArea, dir) {
     let low = 0;
-    let high = 0.05; // ~5km radius, sufficient for any parcel
+    let high = 0.05; 
     let resultPoly = null;
     
-    // Binary Search to sweep line inward until target area matches
     for (let iter = 0; iter < 60; iter++) {
         let mid = (low + high) / 2;
         let sweeperBox;
@@ -465,30 +428,20 @@ function performSplit(feature, targetArea, dir) {
         }
         
         let intersection = null;
-        try { 
-            intersection = turf.intersect(feature, sweeperBox); 
-        } catch(e) { }
-
+        try { intersection = turf.intersect(feature, sweeperBox); } catch(e) { }
         let currentArea = intersection ? turf.area(intersection) : 0;
         
         if (Math.abs(currentArea - targetArea) <= 1.0 && intersection) { 
             resultPoly = intersection; 
             break; 
         }
-        
-        if (currentArea > targetArea) {
-            high = mid; // Box too big, pull back
-        } else {
-            low = mid;  // Box too small, push forward
-        }
-        
+        if (currentArea > targetArea) high = mid; else low = mid;
         if (intersection) resultPoly = intersection;
     }
-    
     return resultPoly;
 }
 
-// Rotated Boundary Lengths
+// Rotated Boundary Lengths Engine
 function drawBoundaryLengths(feature) {
     const coordinates = turf.getCoords(feature);
     const rings = feature.geometry.type === 'MultiPolygon' ? coordinates.flat(1) : coordinates;
@@ -547,17 +500,15 @@ function renderSmartLabels() {
     parcelLabelsLayer.clearLayers();
     if (!map.hasLayer(parcelLabelsLayer) || currentSheetFeatures.length === 0) return;
 
-    let placedBoxes = []; // Array to track physical screen space occupied by labels
+    let placedBoxes = []; 
 
     currentSheetFeatures.forEach(feature => {
         const pNo = feature.properties.PARCEL_NO;
         if (!pNo) return;
 
-        // Find geometric center
         const center = turf.centerOfMass(feature).geometry.coordinates;
         const centerScreen = map.project([center[1], center[0]]); 
 
-        // 1. Calculate Alignment Angle (Longest Edge)
         const coords = feature.geometry.type === 'Polygon' ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0][0];
         let maxLen = 0; 
         let angle = 0;
@@ -571,10 +522,8 @@ function renderSmartLabels() {
                 angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
             }
         }
-        // Keep text right-side up
         if (angle > 90 || angle < -90) angle += 180; 
 
-        // 2. Size Check for Leader Lines
         const bbox = turf.bbox(feature);
         const swScreen = map.project([bbox[1], bbox[0]]);
         const neScreen = map.project([bbox[3], bbox[2]]);
@@ -582,90 +531,60 @@ function renderSmartLabels() {
         const pixelHeight = Math.abs(swScreen.y - neScreen.y);
         
         const isSmall = pixelWidth < 35 || pixelHeight < 20; 
-        
         let labelScreenPt = centerScreen;
         let needsLeader = false;
         
-        // Approx dimensions of our text label
         const halfW = 15; 
         const halfH = 10; 
         let box = { minX: labelScreenPt.x - halfW, maxX: labelScreenPt.x + halfW, minY: labelScreenPt.y - halfH, maxY: labelScreenPt.y + halfH };
-
-        // 3. Collision Detection
         let hasCollision = placedBoxes.some(b => !(box.maxX < b.minX || box.minX > b.maxX || box.maxY < b.minY || box.minY > b.maxY));
 
         if (hasCollision || isSmall) {
-            // Push label up and right
             labelScreenPt = L.point(centerScreen.x + 35, centerScreen.y - 35);
             box = { minX: labelScreenPt.x - halfW, maxX: labelScreenPt.x + halfW, minY: labelScreenPt.y - halfH, maxY: labelScreenPt.y + halfH };
             needsLeader = true;
-            angle = 0; // Force horizontal text for leader lines
+            angle = 0; 
             
-            // Re-check collision
             let stillCollides = placedBoxes.some(b => !(box.maxX < b.minX || box.minX > b.maxX || box.maxY < b.minY || box.minY > b.maxY));
             if (stillCollides) return; 
         }
         
         placedBoxes.push(box); 
-
         const labelLatLng = map.unproject(labelScreenPt);
         const centerLatLng = map.unproject(centerScreen);
 
-        // Draw Leader Line with Arrowhead
         if (needsLeader) {
-            // Calculate the angle of the leader line
             const lineAngle = Math.atan2(labelScreenPt.y - centerScreen.y, labelScreenPt.x - centerScreen.x);
-            
-            // Pull the arrowhead back 16 pixels so it doesn't cross over the text
-            const tipScreen = L.point(
-                labelScreenPt.x - 16 * Math.cos(lineAngle),
-                labelScreenPt.y - 16 * Math.sin(lineAngle)
-            );
+            const tipScreen = L.point(labelScreenPt.x - 16 * Math.cos(lineAngle), labelScreenPt.y - 16 * Math.sin(lineAngle));
             const tipLatLng = map.unproject(tipScreen);
 
-            // Draw the main dashed line
             L.polyline([centerLatLng, tipLatLng], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
             L.polyline([centerLatLng, tipLatLng], { color: '#374151', weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
             L.circleMarker(centerLatLng, { radius: 2, color: '#374151', fillColor: '#fff', fillOpacity: 1, weight: 1, interactive: false }).addTo(parcelLabelsLayer);
 
-            // Calculate Arrowhead coordinates (30 degree swept wings)
             const arrowLen = 8; 
-            const sweepAngle = Math.PI / 6; // 30 degrees
-            
-            const p1Screen = L.point(
-                tipScreen.x - arrowLen * Math.cos(lineAngle - sweepAngle),
-                tipScreen.y - arrowLen * Math.sin(lineAngle - sweepAngle)
-            );
-            const p2Screen = L.point(
-                tipScreen.x - arrowLen * Math.cos(lineAngle + sweepAngle),
-                tipScreen.y - arrowLen * Math.sin(lineAngle + sweepAngle)
-            );
+            const sweepAngle = Math.PI / 6; 
+            const p1Screen = L.point(tipScreen.x - arrowLen * Math.cos(lineAngle - sweepAngle), tipScreen.y - arrowLen * Math.sin(lineAngle - sweepAngle));
+            const p2Screen = L.point(tipScreen.x - arrowLen * Math.cos(lineAngle + sweepAngle), tipScreen.y - arrowLen * Math.sin(lineAngle + sweepAngle));
 
-            const p1 = map.unproject(p1Screen);
-            const p2 = map.unproject(p2Screen);
-
-            // Draw the "V" shape for the arrowhead
-            L.polyline([p1, tipLatLng, p2], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
-            L.polyline([p1, tipLatLng, p2], { color: '#374151', weight: 1.5, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
+            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
+            L.polyline([map.unproject(p1Screen), tipLatLng, map.unproject(p2Screen)], { color: '#374151', weight: 1.5, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(parcelLabelsLayer);
         }
 
-        // Draw Text
         const labelIcon = L.divIcon({
             className: 'length-label-container',
             html: `<div class="parcel-label" style="transform: rotate(${angle}deg);">${pNo}</div>`,
             iconSize: [30, 20],
             iconAnchor: [15, 10]
         });
-
         L.marker(labelLatLng, { icon: labelIcon, interactive: false }).addTo(parcelLabelsLayer);
     });
 }
 
-// React to Map Movements and Toggles
-map.on('zoomend', () => renderSmartLabels()); // Recalculate collisions based on new zoom scale
-parcelLabelsLayer.on('add', () => renderSmartLabels()); // Draw when checkbox is clicked
+// Map Event Binding Pipelines
+map.on('zoomend', () => renderSmartLabels()); 
+parcelLabelsLayer.on('add', () => renderSmartLabels()); 
 
-// Listen to the Layers Panel for Boundary Lengths toggle
 map.on('overlayadd', function(e) {
     if (e.layer === lengthLabelsLayer) {
         isLabelsVisible = true;
