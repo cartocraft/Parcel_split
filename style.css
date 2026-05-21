@@ -23,16 +23,18 @@
 /* Smart Parcel Labels */
 .parcel-label {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 13px;
-    font-weight: 900;
-    color: #111827; /* Dark Gray */
+    font-size: 8px; /* Increased size so it looks large */
+    font-weight: normal; /* Removes the heavy bolding for a thinner look */
+    color: #111827; /* Very dark gray for contrast */
+    
+    /* A thin, crisp 1-pixel white halo (no blur) */
     text-shadow: 
-        -1.5px -1.5px 0 #fff,  
-         1.5px -1.5px 0 #fff,
-        -1.5px  1.5px 0 #fff,
-         1.5px  1.5px 0 #fff,
-         0px    0px   4px rgba(255,255,255,0.8);
+        -1px -1px 0 #ffffff,  
+         1px -1px 0 #ffffff,
+        -1px  1px 0 #ffffff,
+         1px  1px 0 #ffffff;
+         
     white-space: nowrap;
     text-align: center;
-    pointer-events: none; /* Let clicks pass through to the polygon */
+    pointer-events: none; /* Lets mouse clicks pass through to the polygon */
 }
