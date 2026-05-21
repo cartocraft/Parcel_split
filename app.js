@@ -158,16 +158,18 @@ function initializeDropdowns() {
         });
     }
 
-    if (sheetSelect) {
+ if (sheetSelect) {
         sheetSelect.addEventListener('change', () => {
             if (!parcelSelect) return;
             
+            // Extract, filter nulls, and sort parcel numbers naturally (handles letters like 14क)
             const parcels = [...new Set(geojsonData
-                .filter(f => ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
+                .filter(f => f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
                 .map(f => f.properties.PARCEL_NO))]
                 .filter(p => p !== null && p !== undefined && p !== '')
                 .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
             
+            // Populate the HTML5 Datalist
             const dataList = document.getElementById('parcel-datalist');
             if (dataList) {
                 dataList.innerHTML = ''; 
@@ -178,21 +180,17 @@ function initializeDropdowns() {
                 });
             }
 
-            // Fallback for standard <select> if datalist is not being used
-            if (parcelSelect.tagName === 'SELECT') {
-                populateSelect(parcelSelect, parcels, "Select Parcel No.");
-            } else {
-                parcelSelect.value = ''; 
-            }
+            parcelSelect.value = ''; // Clear out any previously typed text
             parcelSelect.disabled = false;
         });
     }
 
-    if (parcelSelect && searchBtn) {
-        const eventType = parcelSelect.tagName === 'INPUT' ? 'input' : 'change';
-        parcelSelect.addEventListener(eventType, () => searchBtn.disabled = !parcelSelect.value.trim());
+if (parcelSelect && searchBtn) {
+        // Use 'input' instead of 'change' so it responds to typing instantly
+        parcelSelect.addEventListener('input', () => {
+            searchBtn.disabled = !parcelSelect.value.trim();
+        });
     }
-}
 
 function populateSelect(el, items, placeholder) {
     if (!el) return;
@@ -204,10 +202,10 @@ function resetSelects(els) {
     els.forEach(el => { 
         if (el) { 
             if (el.tagName === 'INPUT') {
-                el.value = ''; 
+                el.value = ''; // Clear text
                 el.disabled = true;
                 const dataList = document.getElementById(el.getAttribute('list'));
-                if (dataList) dataList.innerHTML = ''; 
+                if (dataList) dataList.innerHTML = ''; // Clear datalist memory
             } else {
                 el.innerHTML = `<option value="">Pending...</option>`; 
                 el.disabled = true; 
