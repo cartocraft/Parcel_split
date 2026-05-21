@@ -131,18 +131,18 @@ function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
 
     // Use VDC or Rem defensively
-    const vdcs = [...new Set(geojsonData.map(f => f.properties.VDC || f.properties.Rem))].filter(Boolean).sort();
+    const vdcs = [...new Set(geojsonData.map(f =>  f.properties.Rem))].filter(Boolean).sort();
     
     if (vdcs.length === 0) {
         console.warn("WARNING: No VDC attributes found in the dataset! Check column names.");
     }
 
-    populateSelect(vdcSelect, vdcs, "Select Municipality");
+    populateSelect(vdcSelect, vdcs, "Select VDC");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
         if (!wardSelect) return;
-        const wards = [...new Set(geojsonData.filter(f => (f.properties.VDC || f.properties.Rem) === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
+        const wards = [...new Set(geojsonData.filter(f => ( f.properties.Rem) === vdcSelect.value).map(f => f.properties.WARD))].filter(Boolean).sort((a,b) => a-b);
         populateSelect(wardSelect, wards, "Select Ward No.");
         wardSelect.disabled = false;
         resetSelects([sheetSelect, parcelSelect]);
@@ -151,7 +151,7 @@ function initializeDropdowns() {
     if (wardSelect) {
         wardSelect.addEventListener('change', () => {
             if (!sheetSelect) return;
-            const sheets = [...new Set(geojsonData.filter(f => (f.properties.VDC || f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
+            const sheets = [...new Set(geojsonData.filter(f => ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value).map(f => f.properties.WD))].filter(Boolean).sort();
             populateSelect(sheetSelect, sheets, "Select Sheet No.");
             sheetSelect.disabled = false;
             resetSelects([parcelSelect]);
@@ -163,7 +163,7 @@ function initializeDropdowns() {
             if (!parcelSelect) return;
             
             const parcels = [...new Set(geojsonData
-                .filter(f => (f.properties.VDC || f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
+                .filter(f => ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value)
                 .map(f => f.properties.PARCEL_NO))]
                 .filter(p => p !== null && p !== undefined && p !== '')
                 .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
@@ -227,7 +227,7 @@ function convertToBKDK(sqMeters) {
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
         activeFeatureData = geojsonData.find(f => 
-            (f.properties.VDC || f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value &&
+            ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value &&
             f.properties.WD == sheetSelect.value && f.properties.PARCEL_NO == parcelSelect.value
         );
 
@@ -255,7 +255,7 @@ if (searchBtn) {
 function generateSheetLayer() {
     mapSheetLayer.clearLayers();
     const sheetFeatures = geojsonData.filter(f => 
-        (f.properties.VDC || f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
+        ( f.properties.Rem) === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
     );
     
     currentSheetFeatures = sheetFeatures; 
