@@ -55,15 +55,15 @@ map._controlCorners.bottomcenter = L.DomUtil.create('div', 'leaflet-bottom leafl
 
 // Layer Switching UI Config 
 L.control.layers({
-    "Google Hybrid (Sat + Labels)": googleHybrid,
-    "Google Satellite (Imagery Only)": googleSat,
+    "Google Hybrid": googleHybrid,
+    "Google Satellite": googleSat,
     "ESRI World Imagery": esriSat,
     "OpenStreetMap (Standard)": osmLayer,
     "None (खाली पृष्ठभूमि)": noneLayer // <-- Added Blank Layer
 }, {
-    "Map Sheet": mapSheetLayer,
-    "Parcel Labels (कित्ता नं)": parcelLabelsLayer,
-    "Boundary Lengths (जग्गाको नाप)": lengthLabelsLayer
+    "नक्सा सिट": mapSheetLayer,
+    "कित्ता नं सहित": parcelLabelsLayer,
+    "जग्गाको नाप": lengthLabelsLayer
 }, { position: 'bottomright', collapsed: true }).addTo(map);
 
 L.control.scale({ position: 'bottomcenter', imperial: false, maxWidth: 150 }).addTo(map);
