@@ -8,9 +8,11 @@ let isLabelsVisible = false;
 let activeFeatureData = null; 
 let parcelLabelsLayer = L.layerGroup(); 
 let currentSheetFeatures = []; 
-let currentTheme = 'satellite'; // Tracks active theme for colors
+let currentTheme = 'satellite'; 
+let gpsLayer = L.layerGroup(); // <-- NEW: GPS Layer
+let isTrackingGPS = false; // Tracks GPS state
 
-// --- Dynamic CSS Injection for Theme Swapping ---
+// --- Dynamic CSS Injection for Themes & Animations ---
 const themeStyles = document.createElement('style');
 themeStyles.innerHTML = `
     /* Default Length Labels (Satellite Mode) */
@@ -23,12 +25,28 @@ themeStyles.innerHTML = `
     }
     /* Clean Theme (None Layer Mode) Overrides */
     .clean-theme .parcel-label {
-        color: #0f172a !important; /* Very Dark Blue/Black */
+        color: #0f172a !important; 
         text-shadow: -1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff !important;
     }
     .clean-theme .length-label {
-        color: #b91c1c !important; /* Crisp Red for measurements */
+        color: #b91c1c !important; 
         text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff !important;
+    }
+    
+    /* NEW: Smart GPS Pulsing Dot */
+    .gps-marker {
+        width: 16px;
+        height: 16px;
+        background-color: #3b82f6; /* Bright Blue */
+        border: 3px solid #ffffff;
+        border-radius: 50%;
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+        animation: pulse-gps 2s infinite;
+    }
+    @keyframes pulse-gps {
+        0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+        70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
     }
 `;
 document.head.appendChild(themeStyles);
@@ -41,7 +59,7 @@ const googleHybrid = L.tileLayer('http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z=
 const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 19, attribution: '&copy; Esri'
 });
-const noneLayer = L.layerGroup(); // Blank layer for clean background
+const noneLayer = L.layerGroup(); 
 
 // Initialize Map Control
 map = L.map('map', {
@@ -55,15 +73,16 @@ map._controlCorners.bottomcenter = L.DomUtil.create('div', 'leaflet-bottom leafl
 
 // Layer Switching UI Config 
 L.control.layers({
-    "Google Hybrid": googleHybrid,
+    "Google Hybrid ": googleHybrid,
     "Google Satellite": googleSat,
     "ESRI World Imagery": esriSat,
     "OpenStreetMap (Standard)": osmLayer,
-    "None (खाली पृष्ठभूमि)": noneLayer // <-- Added Blank Layer
+    "None (खाली पृष्ठभूमि)": noneLayer 
 }, {
-    "नक्सा सिट": mapSheetLayer,
-    "कित्ता नं सहित": parcelLabelsLayer,
-    "जग्गाको नाप": lengthLabelsLayer
+    "Map Sheet": mapSheetLayer,
+    "(कित्ता नं)": parcelLabelsLayer,
+    "(जग्गाको नाप)": lengthLabelsLayer,
+    "GPS": gpsLayer // <-- NEW GPS TOGGLE
 }, { position: 'bottomright', collapsed: true }).addTo(map);
 
 L.control.scale({ position: 'bottomcenter', imperial: false, maxWidth: 150 }).addTo(map);
@@ -92,34 +111,30 @@ splitResultsLayer.addTo(map);
 // ==========================================
 function getSheetStyle() {
     return currentTheme === 'clean' 
-        ? { color: '#64748b', weight: 1.5, fillColor: '#e2e8f0', fillOpacity: 0.2 } // High contrast slate
-        : { color: '#FFEA00', weight: 1.5, fillColor: '#FFEA00', fillOpacity: 0.05 }; // Yellow
+        ? { color: '#64748b', weight: 1.5, fillColor: '#e2e8f0', fillOpacity: 0.2 } 
+        : { color: '#FFEA00', weight: 1.5, fillColor: '#FFEA00', fillOpacity: 0.05 }; 
 }
 function getActiveParcelStyle() {
     return currentTheme === 'clean'
-        ? { color: '#1d4ed8', weight: 3.5, fillColor: '#3b82f6', fillOpacity: 0.15 } // Deep blue
-        : { color: '#00FFFF', weight: 4, fillColor: '#00FFFF', fillOpacity: 0.25 }; // Cyan
+        ? { color: '#1d4ed8', weight: 3.5, fillColor: '#3b82f6', fillOpacity: 0.15 } 
+        : { color: '#00FFFF', weight: 4, fillColor: '#00FFFF', fillOpacity: 0.25 }; 
 }
 function getFadedParcelStyle() {
     return currentTheme === 'clean'
-        ? { color: '#94a3b8', fillColor: '#cbd5e1', fillOpacity: 0.3, weight: 2 } // Grayed out
-        : { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }; // Faded blue
+        ? { color: '#94a3b8', fillColor: '#cbd5e1', fillOpacity: 0.3, weight: 2 } 
+        : { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }; 
 }
 function getSplitStyle() {
     return currentTheme === 'clean'
-        ? { color: '#b91c1c', weight: 3, fillColor: '#ef4444', fillOpacity: 0.3 } // Red for cut
-        : { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }; // Orange
+        ? { color: '#b91c1c', weight: 3, fillColor: '#ef4444', fillOpacity: 0.3 } 
+        : { color: '#FF5722', weight: 3, fillColor: '#FF9800', fillOpacity: 0.6 }; 
 }
 
 function applyTheme(theme) {
     currentTheme = theme;
-    
-    // Update existing layers dynamically
     mapSheetLayer.eachLayer(l => l.setStyle(getSheetStyle()));
     if (currentParcelLayer) currentParcelLayer.setStyle(getActiveParcelStyle());
     splitResultsLayer.eachLayer(l => l.setStyle(getSplitStyle()));
-    
-    // Re-render labels so they pick up the new leader-line colors & CSS classes
     if (map.hasLayer(parcelLabelsLayer)) renderSmartLabels();
     if (isLabelsVisible && activeFeatureData) {
         lengthLabelsLayer.clearLayers();
@@ -128,14 +143,13 @@ function applyTheme(theme) {
     }
 }
 
-// Listen for Basemap changes
 map.on('baselayerchange', function(e) {
     if (e.name === "None (खाली पृष्ठभूमि)") {
-        map.getContainer().style.backgroundColor = '#f8fafc'; // Crisp off-white
+        map.getContainer().style.backgroundColor = '#f8fafc'; 
         map.getContainer().classList.add('clean-theme');
         applyTheme('clean');
     } else {
-        map.getContainer().style.backgroundColor = '#111827'; // Dark space
+        map.getContainer().style.backgroundColor = '#111827'; 
         map.getContainer().classList.remove('clean-theme');
         applyTheme('satellite');
     }
@@ -171,7 +185,6 @@ if (splitToggleBtn && splitForm) {
 }
 
 // Database Connection
-console.log("Attempting to fetch data...");
 fetch('./TriyugTopo_v4.json')
     .then(res => {
         if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
@@ -188,18 +201,17 @@ fetch('./TriyugTopo_v4.json')
         initializeDropdowns();
     })
     .catch(err => {
-        console.error("FATAL ERROR loading JSON:", err);
+        console.error("FATAL ERROR:", err);
         if (errorDisplay) {
             errorDisplay.textContent = `Data Fetch Error: ${err.message}`;
             errorDisplay.classList.remove('hidden');
         }
-        if (vdcSelect) vdcSelect.innerHTML = '<option>Error loading data</option>';
     });
 
 function initializeDropdowns() {
     if (!vdcSelect || !geojsonData) return;
     const vdcs = [...new Set(geojsonData.map(f => f.properties.Rem))].filter(Boolean).sort();
-    populateSelect(vdcSelect, vdcs, "Select Municipality");
+    populateSelect(vdcSelect, vdcs, "साविक गा.वि.स./न.पा");
     vdcSelect.disabled = false;
 
     vdcSelect.addEventListener('change', () => {
@@ -567,7 +579,7 @@ function groupSegments(ring, tol) {
 }
 
 // ==========================================
-// Dynamic Smart Labeling Engine (With Arrowheads)
+// Dynamic Smart Labeling Engine 
 // ==========================================
 function renderSmartLabels() {
     parcelLabelsLayer.clearLayers();
@@ -575,9 +587,8 @@ function renderSmartLabels() {
 
     let placedBoxes = []; 
 
-    // Define leader line colors based on Theme
     const leaderBg = currentTheme === 'clean' ? '#ffffff' : '#ffffff';
-    const leaderFg = currentTheme === 'clean' ? '#0f172a' : '#374151'; // Darker line in clean mode
+    const leaderFg = currentTheme === 'clean' ? '#0f172a' : '#374151'; 
 
     currentSheetFeatures.forEach(feature => {
         const pNo = feature.properties.PARCEL_NO;
@@ -662,6 +673,9 @@ function renderSmartLabels() {
 map.on('zoomend', () => renderSmartLabels()); 
 parcelLabelsLayer.on('add', () => renderSmartLabels()); 
 
+// ==========================================
+// Checkbox Interactivity (Lengths & GPS)
+// ==========================================
 map.on('overlayadd', function(e) {
     if (e.layer === lengthLabelsLayer) {
         isLabelsVisible = true;
@@ -673,11 +687,59 @@ map.on('overlayadd', function(e) {
             });
         }
     }
+    
+    // GPS Tracker Enabled
+    if (e.layer === gpsLayer) {
+        isTrackingGPS = true;
+        map.locate({ setView: true, maxZoom: 18, watch: true, enableHighAccuracy: true });
+    }
 });
 
 map.on('overlayremove', function(e) {
     if (e.layer === lengthLabelsLayer) {
         isLabelsVisible = false;
         lengthLabelsLayer.clearLayers(); 
+    }
+    
+    // GPS Tracker Disabled
+    if (e.layer === gpsLayer) {
+        isTrackingGPS = false;
+        map.stopLocate();
+        gpsLayer.clearLayers(); 
+    }
+});
+
+// GPS Location Found Event
+map.on('locationfound', function(e) {
+    if (!isTrackingGPS) return;
+    
+    gpsLayer.clearLayers(); 
+    const radius = e.accuracy / 2;
+    
+    const gpsIcon = L.divIcon({
+        className: 'gps-marker-container',
+        html: '<div class="gps-marker"></div>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
+    });
+
+    L.marker(e.latlng, { icon: gpsIcon })
+        .bindPopup(`तपाईंको स्थान (Accuracy: ${Math.round(radius)}m)`)
+        .addTo(gpsLayer);
+        
+    L.circle(e.latlng, { 
+        radius: radius, 
+        color: '#3b82f6', 
+        weight: 1, 
+        fillColor: '#3b82f6', 
+        fillOpacity: 0.15 
+    }).addTo(gpsLayer);
+});
+
+// GPS Error Handling
+map.on('locationerror', function(e) {
+    if (isTrackingGPS) {
+        alert("स्थान पत्ता लगाउन सकिएन (GPS Error): " + e.message);
+        map.removeLayer(gpsLayer); // Auto turn off the toggle if failed
     }
 });
