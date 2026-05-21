@@ -23,7 +23,7 @@
 /* Smart Parcel Labels */
 .parcel-label {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 8px; /* Increased size so it looks large */
+    font-size:12px; /* Increased size so it looks large */
     font-weight: normal; /* Removes the heavy bolding for a thinner look */
     color: #111827; /* Very dark gray for contrast */
     
