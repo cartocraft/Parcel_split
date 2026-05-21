@@ -6,6 +6,8 @@ let lengthLabelsLayer = L.layerGroup();
 let splitResultsLayer = L.layerGroup(); 
 let isLabelsVisible = false;
 let activeFeatureData = null; 
+let parcelLabelsLayer = L.layerGroup(); 
+let currentSheetFeatures = []; // Stores features for dynamic zoom labeling
 
 // 1. Define Base Layers
 const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
@@ -28,6 +30,7 @@ L.control.layers({
     "OpenStreetMap (Standard)": osmLayer
 }, {
     "Map Sheet": mapSheetLayer
+    "Parcel Labels (कित्ता नं)": parcelLabelsLayer
 }, { position: 'bottomright', collapsed: true }).addTo(map);
 
 L.control.scale({ position: 'bottomcenter', imperial: false, maxWidth: 150 }).addTo(map);
@@ -215,7 +218,9 @@ function generateSheetLayer() {
     const sheetFeatures = geojsonData.filter(f => 
         f.properties.Rem === vdcSelect.value && f.properties.WARD == wardSelect.value && f.properties.WD == sheetSelect.value
     );
-
+currentSheetFeatures = sheetFeatures; 
+    renderSmartLabels();
+    
     L.geoJSON({ "type": "FeatureCollection", "features": sheetFeatures }, {
         style: { color: '#FFEA00', weight: 1.5, fillColor: '#FFEA00', fillOpacity: 0.05 },
         onEachFeature: function (feature, layer) {
@@ -492,6 +497,99 @@ function groupSegments(ring, tol) {
     return sides;
 }
 
+// ==========================================
+// Dynamic Smart Labeling Engine
+// ==========================================
+function renderSmartLabels() {
+    parcelLabelsLayer.clearLayers();
+    if (!map.hasLayer(parcelLabelsLayer) || currentSheetFeatures.length === 0) return;
+
+    let placedBoxes = []; // Array to track physical screen space occupied by labels
+
+    currentSheetFeatures.forEach(feature => {
+        const pNo = feature.properties.PARCEL_NO;
+        if (!pNo) return;
+
+        // Find geometric center
+        const center = turf.centerOfMass(feature).geometry.coordinates;
+        const centerScreen = map.project([center[1], center[0]]); 
+
+        // 1. Calculate Alignment Angle (Longest Edge)
+        const coords = feature.geometry.type === 'Polygon' ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0][0];
+        let maxLen = 0; 
+        let angle = 0;
+        
+        for (let i = 0; i < coords.length - 1; i++) {
+            let p1 = map.project([coords[i][1], coords[i][0]]);
+            let p2 = map.project([coords[i+1][1], coords[i+1][0]]);
+            let dist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            if (dist > maxLen) {
+                maxLen = dist;
+                angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+            }
+        }
+        // Keep text right-side up
+        if (angle > 90 || angle < -90) angle += 180; 
+
+        // 2. Size Check for Leader Lines (Calculate visual width of polygon on screen)
+        const bbox = turf.bbox(feature);
+        const swScreen = map.project([bbox[1], bbox[0]]);
+        const neScreen = map.project([bbox[3], bbox[2]]);
+        const pixelWidth = Math.abs(neScreen.x - swScreen.x);
+        const pixelHeight = Math.abs(swScreen.y - neScreen.y);
+        
+        const isSmall = pixelWidth < 35 || pixelHeight < 20; // If smaller than a text box
+        
+        let labelScreenPt = centerScreen;
+        let needsLeader = false;
+        
+        // Approx dimensions of our text label
+        const halfW = 15; 
+        const halfH = 10; 
+        let box = { minX: labelScreenPt.x - halfW, maxX: labelScreenPt.x + halfW, minY: labelScreenPt.y - halfH, maxY: labelScreenPt.y + halfH };
+
+        // 3. Collision Detection
+        let hasCollision = placedBoxes.some(b => !(box.maxX < b.minX || box.minX > b.maxX || box.maxY < b.minY || box.minY > b.maxY));
+
+        if (hasCollision || isSmall) {
+            // Push label up and right
+            labelScreenPt = L.point(centerScreen.x + 30, centerScreen.y - 30);
+            box = { minX: labelScreenPt.x - halfW, maxX: labelScreenPt.x + halfW, minY: labelScreenPt.y - halfH, maxY: labelScreenPt.y + halfH };
+            needsLeader = true;
+            angle = 0; // Force horizontal text for leader lines
+            
+            // Re-check collision after moving. If it STILL hits something, drop it to prevent clutter.
+            let stillCollides = placedBoxes.some(b => !(box.maxX < b.minX || box.minX > b.maxX || box.maxY < b.minY || box.minY > b.maxY));
+            if (stillCollides) return; 
+        }
+        
+        placedBoxes.push(box); // Register this space as taken
+
+        const labelLatLng = map.unproject(labelScreenPt);
+        const centerLatLng = map.unproject(centerScreen);
+
+        // Draw Leader Line if needed
+        if (needsLeader) {
+            L.polyline([centerLatLng, labelLatLng], { color: '#ffffff', weight: 4, opacity: 0.8, interactive: false }).addTo(parcelLabelsLayer);
+            L.polyline([centerLatLng, labelLatLng], { color: '#374151', weight: 1.5, dashArray: '2, 4', interactive: false }).addTo(parcelLabelsLayer);
+            L.circleMarker(centerLatLng, { radius: 2, color: '#374151', fillColor: '#fff', fillOpacity: 1, weight: 1, interactive: false }).addTo(parcelLabelsLayer);
+        }
+
+        // Draw Text
+        const labelIcon = L.divIcon({
+            className: 'length-label-container',
+            html: `<div class="parcel-label" style="transform: rotate(${angle}deg);">${pNo}</div>`,
+            iconSize: [30, 20],
+            iconAnchor: [15, 10]
+        });
+
+        L.marker(labelLatLng, { icon: labelIcon, interactive: false }).addTo(parcelLabelsLayer);
+    });
+}
+
+// React to Map Movements and Toggles
+map.on('zoomend', () => renderSmartLabels()); // Recalculate collisions based on new zoom scale
+parcelLabelsLayer.on('add', () => renderSmartLabels()); // Draw when checkbox is clicked
 if (toggleLabels) {
     toggleLabels.addEventListener('change', (e) => {
         isLabelsVisible = e.target.checked;
